@@ -28,7 +28,7 @@ All of the following configurations can be applied to any of the appropriate Not
 |Notefiles|Selected Notefiles| |
 |Include Other Notefiles|_session.qo| |
 |Transform Data|JSONata Expression| |
-|JSONata Expression| `($not(body.opened) ? $doNotRoute(): {"device":device, "fleets":fleets});` | Filter to only session opening events, and only provide the necessary data required for the firmware check|
+|JSONata Expression| `($not(body.opened) ? $doNotRoute(): {"device":device, "fleets":fleets})` | Filter to only session opening events, and only provide the necessary data required for the firmware check|
 |**For Testing**| |When testing the route setup and configuration, also apply the following|
 |Enable this route| off (false) | Will show `(Currently disabled)` on Route UI when set to off|
 
