@@ -60,15 +60,15 @@ firmwareCache = FirmwareCache()
 
 
 
-def fetchDeviceFirmwareVersion(project, deviceUID, firmwareType):
+def fetchDeviceFirmwareInfo(project, deviceUID, firmwareType):
     d = project.getDeviceFirmwareUpdateHistory(deviceUID, firmwareType)
-    return d.get("current",{}).get("version")
+    return d.get("current",{})
     
 
-def requestUpdateToTargetVersion(project, deviceUID, currentVersion, targetVersions, firmwareType):
+def requestUpdateToTargetVersion(project, deviceUID, currentVersion, target_versions, firmwareType):
     #global firmwareCache
 
-    fw = targetVersions.get(firmwareType)
+    fw = target_versions.get(firmwareType)
     
     if (fw is None):
         return f"No firmware update request for {firmwareType}"
@@ -90,28 +90,22 @@ def requestUpdateToTargetVersion(project, deviceUID, currentVersion, targetVersi
 
 
 
-def manageFirmware(project, deviceUID,fleetUID=None,notecardFirmwareVersion=None, hostFirmwareVersion=None, rules={}):
+def manageFirmware(project, deviceUID, device_data, rules={}):
 
-    if notecardFirmwareVersion is None:
-        notecardFirmwareVersion = fetchDeviceFirmwareVersion(project, deviceUID, FirmwareType.Notecard)
+    if device_data.get("firmware_notecard") is None:
+        device_data["firmware_notecard"] = fetchDeviceFirmwareInfo(project, deviceUID, FirmwareType.Notecard)
 
-    if hostFirmwareVersion is None:
-        hostFirmwareVersion = fetchDeviceFirmwareVersion(project, deviceUID, FirmwareType.Host)
+    if device_data.get("firmware_host") is None:
+        device_data["firmware_host"] = fetchDeviceFirmwareInfo(project, deviceUID, FirmwareType.Host)
 
-    # Create device data dictionary for rule evaluation
-    device_data = {
-        "fleets": [fleetUID] if fleetUID else [],
-        "firmware_notecard": notecardFirmwareVersion,
-        "firmware_host": hostFirmwareVersion
-    }
     
-    (ruleID, targetVersions) = getFirmwareUpdateTargets(device_data, rules)
+    (ruleID, target_versions) = getFirmwareUpdateTargets(device_data, rules)
 
     if ruleID is None:
         return "No rule conditions met. No updates required"
     
     ruleMessage = f"According to rule id {ruleID},"
-    updateNotRequired = targetVersions is None
+    updateNotRequired = target_versions is None
     if updateNotRequired:
         return f"{ruleMessage} firmware requirements met, no updates required"
     
@@ -127,8 +121,13 @@ def manageFirmware(project, deviceUID,fleetUID=None,notecardFirmwareVersion=None
         return f"{ruleMessage} firmware requirements NOT met.  Update not requested because Host update is in progress"
     
 
-    ncMessage   = requestUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, targetVersions, FirmwareType.Notecard)
-    hostMessage = requestUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, targetVersions, FirmwareType.Host)
+    # Extract current versions from device_data for update requests
+    notecardFirmwareVersion = device_data.get("firmware_notecard", {}).get("version")
+    hostFirmwareVersion = device_data.get("firmware_host", {}).get("version")
+    
+    
+    ncMessage   = requestUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
+    hostMessage = requestUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
 
     m = " ".join([ruleMessage, ncMessage, hostMessage])
     

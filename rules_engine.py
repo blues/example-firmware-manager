@@ -9,7 +9,7 @@ making it easily testable and reusable.
 """
 
 # Default rule set that accepts any configuration but doesn't request updates
-DEFAULT_RULES = [{"id": "default", "conditions": None, "targetVersions": None}]
+DEFAULT_RULES = [{"id": "default", "conditions": None, "target_versions": None}]
 
 
 def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
@@ -36,7 +36,7 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
                 - str: Exact match required
                 - callable: Function called with device value, returns bool
                 - None: Always matches (condition ignored)
-        - targetVersions: Target firmware versions if conditions match
+        - target_versions: Target firmware versions if conditions match
             - Can be None (no updates), string, or dict with firmware type keys
             
     Notes:
@@ -44,7 +44,7 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
         - If condition is None or missing, it's considered always true
         - If condition is callable, it's called with the device value
         - If condition is string, it must match exactly
-        - If all conditions in a rule match, that rule's targetVersions are returned
+        - If all conditions in a rule match, that rule's target_versions are returned
         
     Example:
         device_data = {
@@ -59,12 +59,12 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
             {
                 "id": "desired-state",
                 "conditions": {"notecard": "8.1.3", "host": "3.1.2", "fleet": "fleet:prod"},
-                "targetVersions": None  # No updates needed
+                "target_versions": None  # No updates needed
             },
             {
                 "id": "outdoor-sensors-update", 
                 "conditions": {"fleet": "fleet:prod", "deviceType": "sensor", "location": "outdoor"},
-                "targetVersions": {"notecard": "8.1.3", "host": "3.1.2"}
+                "target_versions": {"notecard": "8.1.3", "host": "3.1.2"}
             }
         ]
     """
@@ -143,7 +143,7 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
     for i, rule in enumerate(rules):
         conditions = rule.get("conditions", None)
         rule_id = rule.get("id", f"rule-{i + 1}")
-        target_versions = rule.get("targetVersions", None)
+        target_versions = rule.get("target_versions", None)
         
         # Check all conditions must be met (iterate over arbitrary fields)
         all_conditions_match = checkConditions(conditions)

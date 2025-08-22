@@ -21,7 +21,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
 
     def test_no_conditions_always_matches(self):
         """Test that rules with no conditions always match."""
-        rules = {"id": "always-match", "conditions": None, "targetVersions": "update-available"}
+        rules = {"id": "always-match", "conditions": None, "target_versions": "update-available"}
         
         rule_id, target_versions = getFirmwareUpdateTargets({}, rules=rules)
         
@@ -57,14 +57,14 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         }
         
         # Test single field condition
-        rules = {"conditions": {"deviceType": "sensor"}, "targetVersions": {"notecard": "8.1.4"}}
+        rules = {"conditions": {"deviceType": "sensor"}, "target_versions": {"notecard": "8.1.4"}}
         _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(target_versions["notecard"], "8.1.4")
         
         # Test multiple field conditions
         rules = {
             "conditions": {"deviceType": "sensor", "location": "outdoor", "environment": "harsh"}, 
-            "targetVersions": {"host": "3.1.3"}
+            "target_versions": {"host": "3.1.3"}
         }
         _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(target_versions["host"], "3.1.3")
@@ -75,7 +75,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         
         rules = {
             "conditions": {"deviceType": "sensor", "location": "outdoor"}, 
-            "targetVersions": "should-not-match"
+            "target_versions": "should-not-match"
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -86,7 +86,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         """Test behavior when device data is missing fields referenced in conditions."""
         device_data = {"field1": "value1"}  # Missing field2
         
-        rules = {"conditions": {"field1": "value1", "field2": "value2"}, "targetVersions": "update"}
+        rules = {"conditions": {"field1": "value1", "field2": "value2"}, "target_versions": "update"}
         
         # Should not match because field2 is missing (None != "value2")
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -109,7 +109,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                     "temperature": lambda t: t and t > 20,
                     "batteryLevel": lambda b: b and b > 80
                 },
-                "targetVersions": {"firmware": "1.2.4"}
+                "target_versions": {"firmware": "1.2.4"}
             }
         ]
         
@@ -123,7 +123,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         
         rules = {
             "conditions": {"batteryLevel": lambda b: b and b > 50},
-            "targetVersions": "should-not-match"
+            "target_versions": "should-not-match"
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -145,7 +145,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "firmware": lambda v: v and v.startswith("2."),  # Callable condition
                 "signalStrength": lambda s: s and s > -70  # Callable condition
             },
-            "targetVersions": {"firmware": "2.1.1"}
+            "target_versions": {"firmware": "2.1.1"}
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -160,12 +160,12 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
             {
                 "id": "first-rule",
                 "conditions": {"environment": "production"},
-                "targetVersions": {"version": "1.0.0"}
+                "target_versions": {"version": "1.0.0"}
             },
             {
                 "id": "second-rule", 
                 "conditions": {"environment": "production", "criticality": "high"},
-                "targetVersions": {"version": "2.0.0"}
+                "target_versions": {"version": "2.0.0"}
             }
         ]
         
@@ -179,18 +179,18 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         device_data = {"deviceType": "test"}
         
         # String target version
-        rules = {"conditions": {"deviceType": "test"}, "targetVersions": "string-version"}
+        rules = {"conditions": {"deviceType": "test"}, "target_versions": "string-version"}
         _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(target_versions, "string-version")
         
         # Dictionary target version
-        rules = {"conditions": {"deviceType": "test"}, "targetVersions": {"fw1": "1.0", "fw2": "2.0"}}
+        rules = {"conditions": {"deviceType": "test"}, "target_versions": {"fw1": "1.0", "fw2": "2.0"}}
         _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(target_versions["fw1"], "1.0")
         self.assertEqual(target_versions["fw2"], "2.0")
         
         # None target version (no updates needed)
-        rules = {"conditions": {"deviceType": "test"}, "targetVersions": None}
+        rules = {"conditions": {"deviceType": "test"}, "target_versions": None}
         _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertIsNone(target_versions)
 
@@ -215,7 +215,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                     "host": "3.1.2",
                     "fleet": "production"
                 },
-                "targetVersions": None  # Already at desired versions
+                "target_versions": None  # Already at desired versions
             },
             {
                 "id": "outdoor-sensor-update",
@@ -225,7 +225,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                     "fleet": "production",
                     "batteryLevel": lambda b: b and b > 50
                 },
-                "targetVersions": {
+                "target_versions": {
                     "notecard": "8.1.3",
                     "host": "3.1.2"
                 }
@@ -235,7 +235,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "conditions": {
                     "signalStrength": lambda s: s and s < -80
                 },
-                "targetVersions": {"notecard": "8.1.4-emergency"}
+                "target_versions": {"notecard": "8.1.4-emergency"}
             }
         ]
         
@@ -249,8 +249,8 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         device_data = {"deviceType": "unknown"}
         
         rules = [
-            {"conditions": {"deviceType": "sensor"}, "targetVersions": "sensor-update"},
-            {"conditions": {"deviceType": "gateway"}, "targetVersions": "gateway-update"}
+            {"conditions": {"deviceType": "sensor"}, "target_versions": "sensor-update"},
+            {"conditions": {"deviceType": "gateway"}, "target_versions": "gateway-update"}
         ]
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -259,7 +259,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
 
     def test_empty_device_data(self):
         """Test behavior with empty device data."""
-        rules = {"conditions": {"someField": "someValue"}, "targetVersions": "update"}
+        rules = {"conditions": {"someField": "someValue"}, "target_versions": "update"}
         
         rule_id, target_versions = getFirmwareUpdateTargets({}, rules=rules)
         self.assertIsNone(rule_id)
@@ -268,7 +268,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
     def test_single_rule_as_dict(self):
         """Test passing a single rule as dict instead of list."""
         device_data = {"status": "active"}
-        rules = {"conditions": {"status": "active"}, "targetVersions": "single-rule-update"}
+        rules = {"conditions": {"status": "active"}, "target_versions": "single-rule-update"}
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(rule_id, "rule-1")  # Auto-generated ID
@@ -293,7 +293,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "firmware_notecard.version": "8.1.3",
                 "firmware_host.version": "3.1.2"
             },
-            "targetVersions": None
+            "target_versions": None
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -320,12 +320,12 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "device_info.batteryLevel": lambda b: b > 80,
                 "device_info.signalStrength": lambda s: s > -60
             },
-            "targetVersions": {"firmware_notecard": "8.1.4"}
+            "target_versions": {"notecard": "8.1.4"}
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(rule_id, "dot-notation-lambda")
-        self.assertEqual(target_versions["firmware_notecard"], "8.1.4")
+        self.assertEqual(target_versions["notecard"], "8.1.4")
 
     def test_dot_notation_missing_base_field(self):
         """Test dot notation when base field doesn't exist."""
@@ -339,7 +339,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "firmware_notecard.version": "8.1.3",
                 "firmware_host.version": "3.1.2"  # This should fail - base field missing
             },
-            "targetVersions": "should-not-match"
+            "target_versions": "should-not-match"
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -360,7 +360,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "firmware_notecard.version": "8.1.3",
                 "firmware_notecard.built": "2024-01-15"  # This should fail - nested field missing
             },
-            "targetVersions": "should-not-match"
+            "target_versions": "should-not-match"
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -379,7 +379,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "firmware_notecard.version": "8.1.3",  # Should fail - can't traverse string
                 "simple_field": "value"  # This part should match
             },
-            "targetVersions": "should-not-match"
+            "target_versions": "should-not-match"
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -408,7 +408,7 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "device.hardware.sensors.temperature.current": lambda t: t > 20,
                 "device.location.coordinates.lat": lambda lat: 40 <= lat <= 41
             },
-            "targetVersions": {"firmware": "optimized-for-location"}
+            "target_versions": {"firmware": "optimized-for-location"}
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
@@ -434,12 +434,12 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
                 "location": "outdoor",  # Regular field
                 "fleets": lambda fleet_list: "fleet:production" in fleet_list  # Regular field with lambda
             },
-            "targetVersions": {"firmware_notecard": "8.1.4"}
+            "target_versions": {"notecard": "8.1.4"}
         }
         
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
         self.assertEqual(rule_id, "rule-1")
-        self.assertEqual(target_versions["firmware_notecard"], "8.1.4")
+        self.assertEqual(target_versions["notecard"], "8.1.4")
 
 
 if __name__ == '__main__':

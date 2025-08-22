@@ -209,9 +209,9 @@ rules = [
             "firmware_notecard.type": "release",                 # Check firmware type
             "firmware_host.built": lambda date: "2024-01" in date  # Check build date
         },
-        "targetVersions": {
-            "firmware_notecard": "8.1.4",
-            "firmware_host": "3.1.3"
+        "target_versions": {
+            "notecard": "8.1.4",
+            "host": "3.1.3"
         }
     }
 ]
@@ -243,9 +243,9 @@ When developing a set of rules, edit the `rules.py` file.
 
 A rule set is a list of dictionaries, each item in the list defines a set of conditions and target firmware versions.
 
-Each rule has an `id`, a set of `conditions` and `targetVersions`.  _IF_ all of the `conditions` are met for a specific rule, then updates to the firmware versions in the `targetVersions` are requested.
+Each rule has an `id`, a set of `conditions` and `target_versions`.  _IF_ all of the `conditions` are met for a specific rule, then updates to the firmware versions in the `target_versions` are requested.
 
-**For testing** rule conditions it is recommended to set the `targetVersions` value to `None`.
+**For testing** rule conditions it is recommended to set the `target_versions` value to `None`.
 
 When a rule is executed by `manage_firmware`, it will return the rule identifier where the conditions were met.
 
@@ -260,7 +260,7 @@ My_Rule_Set = [
             "firmware_host": "3.1.2",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions": None  # Do not request firmware update
+        "target_versions": None  # Do not request firmware update
     },
     {
         "id":"next-highest-precedent-rule",
@@ -269,7 +269,7 @@ My_Rule_Set = [
             "firmware_host": "3.1.1",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":None
+        "target_versions":None
     },
     {
         "id":"lowest-precedent-rule",
@@ -278,7 +278,7 @@ My_Rule_Set = [
             "firmware_host": "2.1",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":None
+        "target_versions":None
     }
 ]
 ```
@@ -297,9 +297,9 @@ manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareV
 
 ### Apply Target Firmware to Rules
 
-Once you have verified the rule conditions are executing as expected, you can then configure the `targetVersions` to the appropriate values for each rule.
+Once you have verified the rule conditions are executing as expected, you can then configure the `target_versions` to the appropriate values for each rule.
 
-Notice in this example the highest precedent rule does not have a set of `targetVersions`. This the desired firmware configuration for this fleet. It acts as a guard against the rest of the rules executing. And will not invoke a firmware update request if the device is already using the desired firmware configuration.
+Notice in this example the highest precedent rule does not have a set of `target_versions`. This the desired firmware configuration for this fleet. It acts as a guard against the rest of the rules executing. And will not invoke a firmware update request if the device is already using the desired firmware configuration.
 
 ```python
 My_Rule_Set = [
@@ -310,7 +310,7 @@ My_Rule_Set = [
             "firmware_host": "3.1.2",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions": None  # Do not request firmware update
+        "target_versions": None  # Do not request firmware update
     },
     {
         "id":"next-highest-precedent-rule",
@@ -319,9 +319,9 @@ My_Rule_Set = [
             "firmware_host": "3.1.1",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":{
-            "firmware_notecard":"8.1.3.1754",
-            "firmware_host":"3.1.2"
+        "target_versions":{
+            "notecard":"8.1.3.1754",
+            "host":"3.1.2"
         }
     },
     {
@@ -331,9 +331,9 @@ My_Rule_Set = [
             "firmware_host": "2.1",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":{
-            "firmware_notecard":"7.5.4.345",
-            "firmware_host":"3.1.1"
+        "target_versions":{
+            "notecard":"7.5.4.345",
+            "host":"3.1.1"
         }
     }
 ]
@@ -390,7 +390,7 @@ Each rule is a Python dictionary with the following structure:
 {
     "id": "rule-n",           # Unique identifier (auto-generated if not provided)
     "conditions": {},         # Dictionary of field conditions
-    "targetVersions": {}      # Target firmware versions to apply
+    "target_versions": {}      # Target firmware versions to apply
 }
 ```
 
@@ -409,7 +409,7 @@ Environmental_Sensor_Rules = [
             "fleets": lambda fleet_list: "fleet:production" in fleet_list,
             "batteryLevel": lambda level: level > 20  # Battery above 20%
         },
-        "targetVersions": None  # Already at desired state
+        "target_versions": None  # Already at desired state
     },
     {
         "id": "update-outdoor-sensors",
@@ -420,9 +420,9 @@ Environmental_Sensor_Rules = [
             "firmware_notecard": lambda v: v.startswith("8.1.2"),  # Any 8.1.2.x version
             "batteryLevel": lambda level: level > 50  # Only update if battery sufficient
         },
-        "targetVersions": {
-            "firmware_notecard": "8.1.3",
-            "firmware_host": "3.1.2"
+        "target_versions": {
+            "notecard": "8.1.3",
+            "host": "3.1.2"
         }
     },
     {
@@ -432,8 +432,8 @@ Environmental_Sensor_Rules = [
             "signalStrength": lambda strength: strength > -75,  # Good signal
             "fleets": lambda fleet_list: any(fleet in fleet_list for fleet in ["fleet:industrial", "fleet:outdoor"])
         },
-        "targetVersions": {
-            "firmware_notecard": "8.1.4-harsh"  # Special firmware for harsh environments
+        "target_versions": {
+            "notecard": "8.1.4-harsh"  # Special firmware for harsh environments
         }
     }
 ]
@@ -539,21 +539,21 @@ Target versions define which firmware updates should be applied when rule condit
 
 **No Updates**: Set to `None`
 ```python
-"targetVersions": None  # No firmware updates requested
+"target_versions": None  # No firmware updates requested
 ```
 
 **Specific Firmware Types**: Use a dictionary with firmware type keys
 ```python
-"targetVersions": {
-    "firmware_notecard": "8.1.3",     # Update Notecard to specific version
-    "firmware_host": "3.1.2"          # Update Host MCU to specific version
+"target_versions": {
+    "notecard": "8.1.3",     # Update Notecard to specific version
+    "host": "3.1.2"          # Update Host MCU to specific version
 }
 ```
 
 **Single Firmware Type**: Update only one type
 ```python
-"targetVersions": {
-    "firmware_notecard": "8.1.4-emergency"  # Emergency Notecard update only
+"target_versions": {
+    "notecard": "8.1.4-emergency"  # Emergency Notecard update only
 }
 ```
 
@@ -590,7 +590,7 @@ Update_Host_Before_Notecard = [
             "firmware_host": lambda v: majorVersion(v) >= 2,
             "fleets": lambda fleet_list: "fleet:production" in fleet_list
         },
-        "targetVersions": None  # Device already on appropriate versions
+        "target_versions": None  # Device already on appropriate versions
     },
     {
         "id":"update-host-first",
@@ -598,8 +598,8 @@ Update_Host_Before_Notecard = [
             "firmware_host": lambda v: majorVersion(v) < 2,
             "fleets": lambda fleet_list: "fleet:production" in fleet_list
         },
-        "targetVersions":{
-            "firmware_host": "2.1.1"  # Update host first
+        "target_versions":{
+            "host": "2.1.1"  # Update host first
         }
     },
     {
@@ -609,8 +609,8 @@ Update_Host_Before_Notecard = [
             "firmware_notecard": lambda v: majorVersion(v) < 8,
             "fleets": lambda fleet_list: "fleet:production" in fleet_list
         },
-        "targetVersions":{
-            "firmware_notecard": "8.1.3.17054"  # Now update Notecard
+        "target_versions":{
+            "notecard": "8.1.3.17054"  # Now update Notecard
         }
     }
 ]
