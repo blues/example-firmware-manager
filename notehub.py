@@ -46,16 +46,18 @@ class FirmwareType:
         return mapping.get(firmware_type, None)
 
 class NotehubClientService:
-    _shared_header = {
-                'Accept': 'application/json',
-                'Content-Type': 'text/plain',
-                }
+    
     def __init__(self, project_uid, user_access_token=None, client_id=None, client_secret=None, host='https://api.notefile.net') -> None:
         if user_access_token is None and client_id is None:
             raise(Exception("Must provide either a user access token or a client Id for authentication"))
         
         if client_id is not None and client_secret is None:
             raise(Exception("Must provide a client secret along with the client ID to enable authentication"))
+        
+        self._shared_header = {
+                'Accept': 'application/json',
+                'Content-Type': 'text/plain',
+                }
         
         isUserToken = user_access_token is not None
         
@@ -122,46 +124,77 @@ class NotehubClientService:
 
         return headers
     
-    
+    def _request(self, *args, **kwargs):
+        """
+        Execute an HTTP request with automatic authentication and error handling.
+        
+        This method automatically injects authentication credentials and handles common
+        HTTP status codes (401, 404, 500, etc.) with appropriate error messages.
+        
+        Args:
+            *args: Positional arguments passed to http.request()
+            **kwargs: Keyword arguments passed to http.request()
+            
+        Returns:
+            http.Response: The HTTP response object for successful requests (2xx status)
+            
+        Raises:
+            Exception: For authentication failures (401), not found errors (404),
+                      or other HTTP errors with descriptive messages
+        """
+        # Apply authentication headers
+        auth_headers = self.getAuthHeader()
+        
+        # Merge authentication headers with existing headers (if any)
+        if 'headers' in kwargs:
+            kwargs['headers'].update(auth_headers)
+        else:
+            kwargs['headers'] = auth_headers
+        
+        
+        # Use requests.request to handle any HTTP method and arguments
+        response = http.request(*args, **kwargs)
+
+        if response.status >=200 and response.status < 300:
+            return response
+        
+        if response.status == 401:
+            raise Exception("Notehub authentication failed. Check API token(s)")
+        
+        if response.status == 404:
+            raise Exception("Notehub path not found")
+        
+        msg = f"Notehub Request Error: {response.status} - {response.data}"
+        raise Exception(msg)
+
     
     def v1Request(self, path, payload = {}, params = {}, method = 'GET'):
 
         p = urlencode(params)
         url = f"{self.host}/v1/projects/{self._project_uid}/{path}?{p}"
 
-        headers = self.getAuthHeader()
-
         jsonPayload = json.dumps(payload)
 
-        response = http.request(method, url, headers=headers, body=jsonPayload)
-
-        if response.status <200 or response.status >= 300:
-            raise(Exception(f"Problem performing Notehub request!\n Status Code: {response.status}\n Message:{response.data}"))
+        response = self._request(method, url, body=jsonPayload)
 
         if not response.data:
             return {}
         
-
         return json.loads(response.data)
     
     def v0Request(self, req, deviceUID = None):
         url = f"{self.host}/req?app={self._project_uid}&device={deviceUID if not deviceUID==None else ''}"
-        headers = self.getAuthHeader()
 
         if isinstance(req, str):
             req = {"req":req}
 
         body = json.dumps(req)
 
-        response = http.request('GET', url=url, headers=headers, body = body)
-
-        if response.status <200 or response.status >= 300:
-            raise(Exception(f"Problem performing Notehub request!\n Status Code: {response.status}\n Message:{response.data}"))
+        response = self._request('GET', url=url, body = body)
 
         if not response.data:
             return {}
         
-
         return json.loads(response.data)
 
 

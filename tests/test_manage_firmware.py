@@ -3,12 +3,12 @@ Unit tests for the manage_firmware module.
 
 This test suite validates the firmware management functionality including:
 - Notehub project connection
-- Firmware caching mechanisms
+- Firmware caching mechanisms  
 - Device firmware version fetching
 - Firmware update requests
 - Main firmware management orchestration
 
-Uses mocking to avoid external dependencies on the notehub module.
+Only mocks external dependencies (notehub module), tests all public methods/functions.
 """
 
 import unittest
@@ -20,26 +20,18 @@ import time
 # Add the parent directory to the path so we can import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Mock the notehub module before importing manage_firmware
-mock_notehub = MagicMock()
-mock_notehub.NotehubProject = MagicMock()
-mock_notehub.FirmwareType = MagicMock()
-mock_notehub.FirmwareType.Notecard = "notecard"
-mock_notehub.FirmwareType.Host = "host"
-sys.modules['notehub'] = mock_notehub
-
 import manage_firmware
 
 
 class TestConnectToNotehubProject(unittest.TestCase):
     """Test cases for connectToNotehubProject function."""
     
+    @patch('manage_firmware.NotehubProject')
     @patch.dict(os.environ, {
         'NOTEHUB_PROJECT_UID': 'test_project_uid',
         'NOTEHUB_CLIENT_ID': 'test_client_id', 
         'NOTEHUB_CLIENT_SECRET': 'test_client_secret'
     })
-    @patch('manage_firmware.NotehubProject')
     def test_connect_with_environment_variables(self, mock_notehub_project):
         """Test successful connection using environment variables."""
         mock_project = MagicMock()
@@ -54,8 +46,8 @@ class TestConnectToNotehubProject(unittest.TestCase):
         )
         self.assertEqual(result, mock_project)
 
-    @patch.dict(os.environ, {}, clear=True)
     @patch('manage_firmware.NotehubProject')
+    @patch.dict(os.environ, {}, clear=True)
     def test_connect_with_missing_environment_variables(self, mock_notehub_project):
         """Test connection with missing environment variables."""
         mock_project = MagicMock()
@@ -86,10 +78,13 @@ class TestFirmwareCache(unittest.TestCase):
         self.assertEqual(cache.cache_expiry, 0)
         self.assertEqual(cache._expiration_duration_seconds, 1800)
 
+    @patch('manage_firmware.FirmwareType')
     @patch('time.time')
-    def test_update_success(self, mock_time):
+    def test_update_success(self, mock_time, mock_firmware_type):
         """Test successful cache update."""
         mock_time.return_value = 1000
+        mock_firmware_type.Notecard = "notecard"
+        mock_firmware_type.Host = "host"
         
         # Mock firmware response
         mock_firmware_data = [
@@ -114,10 +109,13 @@ class TestFirmwareCache(unittest.TestCase):
         self.assertEqual(self.cache.cache_expiry, 2800)  # 1000 + 1800
         self.mock_project.fetchAvailableFirmware.assert_called_once()
 
+    @patch('manage_firmware.FirmwareType')
     @patch('time.time')
-    def test_update_with_incomplete_data(self, mock_time):
+    def test_update_with_incomplete_data(self, mock_time, mock_firmware_type):
         """Test cache update with incomplete firmware data."""
         mock_time.return_value = 1000
+        mock_firmware_type.Notecard = "notecard"
+        mock_firmware_type.Host = "host"
         
         # Mock firmware response with missing fields
         mock_firmware_data = [
@@ -341,59 +339,53 @@ class TestManageFirmware(unittest.TestCase):
         """Set up test fixtures."""
         self.mock_project = MagicMock()
         
-    @patch('manage_firmware.fetchDeviceFirmwareVersion')
-    @patch('manage_firmware.getFirmwareUpdateTargets')
-    def test_no_rule_conditions_met(self, mock_get_targets, mock_fetch_version):
+    def test_no_rule_conditions_met(self):
         """Test when no rule conditions are met."""
-        mock_get_targets.return_value = (None, None)
-        
+        # Use empty rules which will result in no conditions met
         result = manage_firmware.manageFirmware(
-            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', {}
+            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', []
         )
         
         self.assertEqual(result, "No rule conditions met. No updates required")
-        mock_get_targets.assert_called_once_with(
-            fleetUID='fleet123', 
-            notecardVersion='8.1.3', 
-            hostVersion='3.1.2', 
-            rules={}
-        )
 
-    @patch('manage_firmware.fetchDeviceFirmwareVersion')
-    @patch('manage_firmware.getFirmwareUpdateTargets')
-    def test_rule_met_no_updates_required(self, mock_get_targets, mock_fetch_version):
+    def test_rule_met_no_updates_required(self):
         """Test when rule is met but no updates required."""
-        mock_get_targets.return_value = ('rule-1', None)
+        # Create a rule that matches but has no target versions
+        rules = [{"id": "rule-1", "conditions": None, "targetVersions": None}]
         
         result = manage_firmware.manageFirmware(
-            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', {}
+            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', rules
         )
         
         self.assertEqual(result, "According to rule id rule-1, firmware requirements met, no updates required")
 
-    @patch('manage_firmware.fetchDeviceFirmwareVersion')
-    @patch('manage_firmware.getFirmwareUpdateTargets')
-    def test_fetch_missing_firmware_versions(self, mock_get_targets, mock_fetch_version):
+    def test_fetch_missing_firmware_versions(self):
         """Test fetching missing firmware versions."""
-        mock_fetch_version.side_effect = ['8.1.3', '3.1.2']  # Return values for notecard and host
-        mock_get_targets.return_value = ('rule-1', None)
+        # Mock the project methods that will be called
+        self.mock_project.getDeviceFirmwareUpdateHistory.side_effect = [
+            {'current': {'version': '8.1.3'}},  # notecard version
+            {'current': {'version': '3.1.2'}}   # host version  
+        ]
         
+        # Call manageFirmware with None versions to trigger fetching
         result = manage_firmware.manageFirmware(
             self.mock_project, 'device123', 'fleet123', None, None, {}
         )
         
-        # Should call fetch twice - once for notecard, once for host
-        self.assertEqual(mock_fetch_version.call_count, 2)
-        mock_fetch_version.assert_has_calls([
-            call(self.mock_project, 'device123', 'notecard'),
-            call(self.mock_project, 'device123', 'host')
-        ])
+        # Should have called getDeviceFirmwareUpdateHistory twice
+        self.assertEqual(self.mock_project.getDeviceFirmwareUpdateHistory.call_count, 2)
+        
+        # Verify it was called with correct parameters
+        expected_calls = [
+            call('device123', 'notecard'),
+            call('device123', 'host')
+        ]
+        self.mock_project.getDeviceFirmwareUpdateHistory.assert_has_calls(expected_calls, any_order=True)
 
-    @patch('manage_firmware.fetchDeviceFirmwareVersion')
-    @patch('manage_firmware.getFirmwareUpdateTargets')
-    def test_notecard_update_in_progress(self, mock_get_targets, mock_fetch_version):
+    def test_notecard_update_in_progress(self):
         """Test when notecard update is already in progress."""
-        mock_get_targets.return_value = ('rule-1', {'notecard': '8.1.4'})
+        # Create a rule that would trigger updates
+        rules = [{"id": "rule-1", "conditions": None, "targetVersions": {"notecard": "8.1.4"}}]
         
         # Mock notecard update in progress
         self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {
@@ -401,7 +393,7 @@ class TestManageFirmware(unittest.TestCase):
         }
         
         result = manage_firmware.manageFirmware(
-            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', {}
+            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', rules
         )
         
         self.assertEqual(
@@ -410,11 +402,10 @@ class TestManageFirmware(unittest.TestCase):
         )
         self.mock_project.getDeviceFirmwareUpdateStatus.assert_called_once_with('device123', 'notecard')
 
-    @patch('manage_firmware.fetchDeviceFirmwareVersion')
-    @patch('manage_firmware.getFirmwareUpdateTargets')
-    def test_host_update_in_progress(self, mock_get_targets, mock_fetch_version):
+    def test_host_update_in_progress(self):
         """Test when host update is already in progress."""
-        mock_get_targets.return_value = ('rule-1', {'host': '3.1.3'})
+        # Create a rule that would trigger host updates
+        rules = [{"id": "rule-1", "conditions": None, "targetVersions": {"host": "3.1.3"}}]
         
         # Mock no notecard update in progress, but host update in progress
         self.mock_project.getDeviceFirmwareUpdateStatus.side_effect = [
@@ -423,7 +414,7 @@ class TestManageFirmware(unittest.TestCase):
         ]
         
         result = manage_firmware.manageFirmware(
-            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', {}
+            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', rules
         )
         
         self.assertEqual(
@@ -432,24 +423,23 @@ class TestManageFirmware(unittest.TestCase):
         )
         self.assertEqual(self.mock_project.getDeviceFirmwareUpdateStatus.call_count, 2)
 
-    @patch('manage_firmware.fetchDeviceFirmwareVersion')
-    @patch('manage_firmware.getFirmwareUpdateTargets')
-    @patch('manage_firmware.requestUpdateToTargetVersion')
-    def test_successful_firmware_updates(self, mock_request_update, mock_get_targets, mock_fetch_version):
+    def test_successful_firmware_updates(self):
         """Test successful firmware update requests."""
-        mock_get_targets.return_value = ('rule-1', {'notecard': '8.1.4', 'host': '3.1.3'})
+        # Create a rule that would trigger both updates
+        rules = [{"id": "rule-1", "conditions": None, "targetVersions": {"notecard": "8.1.4", "host": "3.1.3"}}]
         
         # Mock no updates in progress
         self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {'dfu_in_progress': False}
         
-        # Mock update request responses
-        mock_request_update.side_effect = [
-            'Requested notecard firmware update from 8.1.3 to 8.1.4.',
-            'Requested host firmware update from 3.1.2 to 3.1.3.'
-        ]
+        # Mock the cache retrieval to return valid firmware files
+        manage_firmware.firmwareCache.cache = {
+            'notecard': {'8.1.4': 'notecard-8.1.4.bin'},
+            'host': {'3.1.3': 'host-3.1.3.bin'}
+        }
+        manage_firmware.firmwareCache.cache_expiry = time.time() + 1000
         
         result = manage_firmware.manageFirmware(
-            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', {}
+            self.mock_project, 'device123', 'fleet123', '8.1.3', '3.1.2', rules
         )
         
         expected_result = ("According to rule id rule-1, "
@@ -457,12 +447,8 @@ class TestManageFirmware(unittest.TestCase):
                           "Requested host firmware update from 3.1.2 to 3.1.3.")
         self.assertEqual(result, expected_result)
         
-        # Verify update requests were made for both firmware types
-        self.assertEqual(mock_request_update.call_count, 2)
-        mock_request_update.assert_has_calls([
-            call(self.mock_project, 'device123', '8.1.3', {'notecard': '8.1.4', 'host': '3.1.3'}, 'notecard'),
-            call(self.mock_project, 'device123', '3.1.2', {'notecard': '8.1.4', 'host': '3.1.3'}, 'host')
-        ])
+        # Verify requestDeviceFirmwareUpdate was called for both firmware types
+        self.assertEqual(self.mock_project.requestDeviceFirmwareUpdate.call_count, 2)
 
 
 if __name__ == '__main__':
