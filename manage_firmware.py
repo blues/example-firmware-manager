@@ -37,7 +37,7 @@ class FirmwareCache:
             
 
     def retrieve(self, project, firmwareType, version):
-        if self._cacheIsExpired:
+        if self._cacheIsExpired():
             self.update(project)
 
         if firmwareType not in self.cache:
