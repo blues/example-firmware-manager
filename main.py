@@ -1,8 +1,12 @@
 import json
 import os
+from auth import authenticate_request
 from manage_firmware import manageFirmware
 from notehub import NotehubProject
 from rules import DevicesInUpdateFleet
+
+def retrieveAuthToken():
+    return os.getenv("FIRMWARE_CHECK_AUTH_TOKEN")
 
 def connectToNotehubProject():
     PROJECT_UID = os.getenv("NOTEHUB_PROJECT_UID")
@@ -31,6 +35,13 @@ def processRoutedSession(payload):
     return manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareVersion, rules=DevicesInUpdateFleet)
 
 def lambda_handler(event, context):
+    result = authenticate_request(event, retrieveAuthToken())
+    if not result.get('success', False):
+        return {
+            'statusCode': 401,
+            'body': result.get('error', 'authentication failure reason not provided')
+        }
+    
     try:
         payload = event["body"]
         if not isinstance(payload, dict):
