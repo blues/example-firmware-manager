@@ -42,7 +42,7 @@ def run_tests_with_coverage():
     
     # Start coverage collection
     cov = coverage.Coverage(
-        source=['auth'],
+        source=['auth', 'rules_engine'],
         omit=[
             '*/tests/*',
             '*/test_*',
