@@ -168,12 +168,23 @@ The rules engine now supports arbitrary field names in conditions, making it inf
 
 ### Device Data Structure
 
-Device data is passed as a dictionary to the rules engine:
+Device data is passed as a dictionary to the rules engine. Firmware information is typically provided as JSON objects containing version details and other metadata:
 
 ```python
 device_data = {
-    "firmware_notecard": "8.1.2",
-    "firmware_host": "3.1.1",
+    "firmware_notecard": {
+        "version": "8.1.3.17074",
+        "built": "2024-01-15T10:30:00Z",
+        "type": "release",
+        "size": 2048576
+    },
+    "firmware_host": {
+        "version": "3.1.2", 
+        "built": "2024-01-10T14:22:00Z",
+        "type": "production",
+        "size": 1024000,
+        "checksum": "abc123def456"
+    },
     "fleets": ["fleet:production", "fleet:sensors"],  # List of fleet UIDs
     "deviceType": "environmental-sensor",
     "location": "outdoor",
@@ -181,6 +192,29 @@ device_data = {
     "signalStrength": -65,
     "environment": "harsh"
 }
+```
+
+### Dot Notation for Nested Objects
+
+The rules engine supports **dot notation** to access nested object properties. This is particularly useful for firmware objects that contain multiple fields:
+
+```python
+# Access firmware version from nested objects
+rules = [
+    {
+        "id": "firmware-version-check",
+        "conditions": {
+            "firmware_notecard.version": lambda v: v and v.startswith("8.1.3"),
+            "firmware_host.version": "3.1.2",                    # Exact version match
+            "firmware_notecard.type": "release",                 # Check firmware type
+            "firmware_host.built": lambda date: "2024-01" in date  # Check build date
+        },
+        "targetVersions": {
+            "firmware_notecard": "8.1.4",
+            "firmware_host": "3.1.3"
+        }
+    }
+]
 ```
 
 ### Initial Testing

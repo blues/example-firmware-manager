@@ -274,6 +274,173 @@ class TestFirmwareUpdateTargets(unittest.TestCase):
         self.assertEqual(rule_id, "rule-1")  # Auto-generated ID
         self.assertEqual(target_versions, "single-rule-update")
 
+    def test_dot_notation_simple_field(self):
+        """Test dot notation with simple nested object access."""
+        device_data = {
+            "firmware_notecard": {
+                "version": "8.1.3",
+                "built": "2024-01-15",
+                "type": "release"
+            },
+            "firmware_host": {
+                "version": "3.1.2", 
+                "size": 1024000
+            }
+        }
+        
+        rules = {
+            "conditions": {
+                "firmware_notecard.version": "8.1.3",
+                "firmware_host.version": "3.1.2"
+            },
+            "targetVersions": None
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "rule-1")
+        self.assertIsNone(target_versions)
+
+    def test_dot_notation_with_lambda_conditions(self):
+        """Test dot notation with callable conditions."""
+        device_data = {
+            "firmware_notecard": {
+                "version": "8.1.3.17074",
+                "built": "2024-01-15"
+            },
+            "device_info": {
+                "batteryLevel": 85,
+                "signalStrength": -55
+            }
+        }
+        
+        rules = {
+            "id": "dot-notation-lambda",
+            "conditions": {
+                "firmware_notecard.version": lambda v: v and v.startswith("8.1.3"),
+                "device_info.batteryLevel": lambda b: b > 80,
+                "device_info.signalStrength": lambda s: s > -60
+            },
+            "targetVersions": {"firmware_notecard": "8.1.4"}
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "dot-notation-lambda")
+        self.assertEqual(target_versions["firmware_notecard"], "8.1.4")
+
+    def test_dot_notation_missing_base_field(self):
+        """Test dot notation when base field doesn't exist."""
+        device_data = {
+            "firmware_notecard": {"version": "8.1.3"}
+            # firmware_host is missing
+        }
+        
+        rules = {
+            "conditions": {
+                "firmware_notecard.version": "8.1.3",
+                "firmware_host.version": "3.1.2"  # This should fail - base field missing
+            },
+            "targetVersions": "should-not-match"
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)  # Should not match due to missing firmware_host
+        self.assertIsNone(target_versions)
+
+    def test_dot_notation_missing_nested_field(self):
+        """Test dot notation when nested field doesn't exist."""
+        device_data = {
+            "firmware_notecard": {
+                "version": "8.1.3"
+                # built field is missing
+            }
+        }
+        
+        rules = {
+            "conditions": {
+                "firmware_notecard.version": "8.1.3",
+                "firmware_notecard.built": "2024-01-15"  # This should fail - nested field missing
+            },
+            "targetVersions": "should-not-match"
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)  # Should not match due to missing built field
+        self.assertIsNone(target_versions)
+
+    def test_dot_notation_non_dict_base_field(self):
+        """Test dot notation when base field is not a dictionary."""
+        device_data = {
+            "firmware_notecard": "8.1.3",  # String, not dict
+            "simple_field": "value"
+        }
+        
+        rules = {
+            "conditions": {
+                "firmware_notecard.version": "8.1.3",  # Should fail - can't traverse string
+                "simple_field": "value"  # This part should match
+            },
+            "targetVersions": "should-not-match"
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)  # Should not match due to invalid traversal
+        self.assertIsNone(target_versions)
+
+    def test_dot_notation_deep_nesting(self):
+        """Test dot notation with deeply nested objects."""
+        device_data = {
+            "device": {
+                "hardware": {
+                    "sensors": {
+                        "temperature": {"current": 23.5, "max": 85},
+                        "humidity": {"current": 65}
+                    }
+                },
+                "location": {
+                    "coordinates": {"lat": 40.7128, "lon": -74.0060}
+                }
+            }
+        }
+        
+        rules = {
+            "id": "deep-nesting",
+            "conditions": {
+                "device.hardware.sensors.temperature.current": lambda t: t > 20,
+                "device.location.coordinates.lat": lambda lat: 40 <= lat <= 41
+            },
+            "targetVersions": {"firmware": "optimized-for-location"}
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "deep-nesting")
+        self.assertEqual(target_versions["firmware"], "optimized-for-location")
+
+    def test_mixed_dot_notation_and_regular_fields(self):
+        """Test mixing dot notation fields with regular fields."""
+        device_data = {
+            "deviceType": "sensor",
+            "location": "outdoor", 
+            "firmware_notecard": {
+                "version": "8.1.3",
+                "type": "release"
+            },
+            "fleets": ["fleet:production", "fleet:sensors"]
+        }
+        
+        rules = {
+            "conditions": {
+                "deviceType": "sensor",  # Regular field
+                "firmware_notecard.version": lambda v: v.startswith("8.1"),  # Dot notation
+                "location": "outdoor",  # Regular field
+                "fleets": lambda fleet_list: "fleet:production" in fleet_list  # Regular field with lambda
+            },
+            "targetVersions": {"firmware_notecard": "8.1.4"}
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "rule-1")
+        self.assertEqual(target_versions["firmware_notecard"], "8.1.4")
+
 
 if __name__ == '__main__':
     unittest.main()

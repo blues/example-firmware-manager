@@ -69,6 +69,42 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
         ]
     """
     
+    def resolve_field_value(field_name):
+        """
+        Resolve field value from device_data, supporting dot notation for nested objects.
+        
+        Args:
+            field_name (str): Field name, potentially with dot notation (e.g., "firmware_notecard.version")
+            
+        Returns:
+            The resolved field value, or None if the field path cannot be found
+            
+        Examples:
+            resolve_field_value("fleet") -> device_data["fleet"]
+            resolve_field_value("firmware_notecard.version") -> device_data["firmware_notecard"]["version"]
+            resolve_field_value("missing.field") -> None
+        """
+        if '.' not in field_name:
+            # Simple field lookup
+            return device_data.get(field_name)
+        
+        # Dot notation - traverse nested object
+        parts = field_name.split('.')
+        current_value = device_data.get(parts[0])
+        
+        if current_value is None:
+            return None
+            
+        # Navigate through the nested structure
+        for part in parts[1:]:
+            if not isinstance(current_value, dict):
+                return None  # Can't traverse further - not a dict
+            current_value = current_value.get(part)
+            if current_value is None:
+                return None  # Field not found in nested structure
+                
+        return current_value
+
     def match_condition(value, condition):
         """
         Check if a device value matches a rule condition.
@@ -93,7 +129,7 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
             return True
         
         for field_name, condition_value in conditions.items():
-            device_field_value = device_data.get(field_name)
+            device_field_value = resolve_field_value(field_name)
             if not match_condition(device_field_value, condition_value):
                 return False
             
@@ -118,3 +154,26 @@ def getFirmwareUpdateTargets(device_data, rules=DEFAULT_RULES):
 
     # No rules matched
     return (None, None)
+
+
+#MIT License
+
+#Copyright (c) 2025 Blues Inc.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
