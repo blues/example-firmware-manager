@@ -83,6 +83,73 @@ You will want to create the following environment variables with the values obta
 > 
 > Do not store these values in source control.
 
+## Request Authorization
+
+This system includes authentication capabilities to secure access to the firmware management endpoints. The `auth.py` module provides comprehensive request authentication using various header formats.
+
+### Supported Authentication Methods
+
+The system supports multiple authentication schemes for maximum flexibility:
+
+1. **Bearer Token** (Recommended)
+   ```
+   Authorization: Bearer <your-token>
+   ```
+
+2. **Direct Token** in Authorization Header
+   ```
+   Authorization: <your-token>
+   ```
+
+3. **API Key Header**
+   ```
+   x-api-key: <your-token>
+   ```
+
+### Authentication Behavior
+
+- **Header Precedence**: The `x-api-key` header takes precedence over the `Authorization` header if both are present
+- **Case Insensitive**: All header names are processed case-insensitively (e.g., `AUTHORIZATION`, `X-API-KEY`)
+- **Whitespace Handling**: Tokens are automatically trimmed of leading/trailing whitespace
+- **Security**: Uses constant-time comparison (`hmac.compare_digest()`) to prevent timing attacks
+
+### Configuration
+
+To enable request authentication, configure your authentication token as an environment variable:
+
+```bash
+export AUTH_TOKEN="your-secure-token-here"
+```
+
+### Example Usage
+
+#### Using Bearer Token (Recommended)
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+#### Using API Key Header
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "x-api-key: your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+### Authentication Errors
+
+The system returns specific error messages for authentication failures:
+
+- `Missing authorization header` - No authentication header provided
+- `Empty authorization token` - Authentication header is empty or contains only whitespace
+- `Invalid authorization token` - Token doesn't match the expected value
+- `Authentication not configured` - Server-side authentication token is not configured
+- `Authentication system error` - Internal error during authentication processing
+
+
 ## Rules Configuration
 
 The content of `rules.py` defines the sets of conditions that must be met in order to request an update to a target Notecard or Host firmware version.
