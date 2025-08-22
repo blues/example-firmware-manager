@@ -98,7 +98,14 @@ def manageFirmware(project, deviceUID,fleetUID=None,notecardFirmwareVersion=None
     if hostFirmwareVersion is None:
         hostFirmwareVersion = fetchDeviceFirmwareVersion(project, deviceUID, FirmwareType.Host)
 
-    (ruleID, targetVersions) = getFirmwareUpdateTargets(fleetUID=fleetUID, notecardVersion=notecardFirmwareVersion, hostVersion=hostFirmwareVersion, rules=rules)
+    # Create device data dictionary for rule evaluation
+    device_data = {
+        "fleet": fleetUID,
+        "notecard": notecardFirmwareVersion,
+        "host": hostFirmwareVersion
+    }
+    
+    (ruleID, targetVersions) = getFirmwareUpdateTargets(device_data, rules)
 
     if ruleID is None:
         return "No rule conditions met. No updates required"

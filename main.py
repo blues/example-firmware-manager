@@ -17,9 +17,10 @@ def connectToNotehubProject():
 
 project = None
 
-def processRoutedSession(payload):
+def processRoutedSession(deviceUID, payload):
 
-    deviceUID = payload.get("device")
+    
+
     notecardFirmwareVersion = payload.get("notecard_firmware")
     hostFirmwareVersion = payload.get("host_firmware")
     fleets = payload.get("fleets", [])
@@ -46,7 +47,15 @@ def lambda_handler(event, context):
         payload = event["body"]
         if not isinstance(payload, dict):
             payload = json.loads(payload)
-        r = processRoutedSession(payload)
+
+        deviceUID = payload.get("device")
+        if not deviceUID or not isinstance(deviceUID, str):
+            return {
+                'statusCode': 400,
+                'body': "bad request. missing valid device UID from the request"
+            }
+        
+        r = processRoutedSession(deviceUID, payload)
     except Exception as e:
         return {
             'statusCode': 500,

@@ -1,10 +1,8 @@
 """
-Unit tests for the firmware update targets functionality.
+Unit tests for the rules engine functionality.
 
-This test suite validates the getFirmwareUpdateTargets function from manage_firmware module,
-testing rule matching, precedence, and target version handling.
-
-Converted from pytest format to unittest format for compatibility with run_tests.py.
+This test suite validates the getFirmwareUpdateTargets function from rules_engine module,
+testing generic rule matching with arbitrary field names, precedence, and target version handling.
 """
 
 import unittest
@@ -19,286 +17,262 @@ from rules_engine import getFirmwareUpdateTargets
 
 
 class TestFirmwareUpdateTargets(unittest.TestCase):
-    """Test cases for the getFirmwareUpdateTargets function."""
+    """Test cases for the getFirmwareUpdateTargets function with arbitrary fields."""
 
-    def test_rule_ids(self):
-        """Test that rule IDs are properly handled and auto-generated when missing."""
+    def test_no_conditions_always_matches(self):
+        """Test that rules with no conditions always match."""
+        rules = {"id": "always-match", "conditions": None, "targetVersions": "update-available"}
+        
+        rule_id, target_versions = getFirmwareUpdateTargets({}, rules=rules)
+        
+        self.assertEqual(rule_id, "always-match")
+        self.assertEqual(target_versions, "update-available")
+
+    def test_rule_id_auto_generation(self):
+        """Test that rule IDs are auto-generated when missing."""
         rules = [
-            {"id": "my-id", "conditions": {"fleet": "my-fleet-1"}}, 
-            {"conditions": {"fleet": "my-fleet-2"}}
+            {"id": "custom-id", "conditions": {"field1": "value1"}}, 
+            {"conditions": {"field2": "value2"}},
+            {"conditions": {"field3": "value3"}}
         ]
 
-        r, _ = getFirmwareUpdateTargets("my-fleet-1", None, None, rules=rules)
-        self.assertEqual(r, "my-id")
+        rule_id, _ = getFirmwareUpdateTargets({"field1": "value1"}, rules=rules)
+        self.assertEqual(rule_id, "custom-id")
 
-        r, _ = getFirmwareUpdateTargets("my-fleet-2", None, None, rules=rules)
-        self.assertEqual(r, "rule-2")
-
-    def test_rules_all_none(self):
-        """Test behavior when all conditions and target versions are None."""
-        rules = {"id": "my-rule", "conditions": None, "targetVersions": None}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=None, rules=rules)
+        rule_id, _ = getFirmwareUpdateTargets({"field2": "value2"}, rules=rules)
+        self.assertEqual(rule_id, "rule-2")
         
-        self.assertIsNone(v)
+        rule_id, _ = getFirmwareUpdateTargets({"field3": "value3"}, rules=rules)
+        self.assertEqual(rule_id, "rule-3")
 
-    def test_rules_notecard_rule_string(self):
-        """Test notecard rules with string conditions and various target version formats."""
-        currentVersion = "notecard_version_info"
-        targetVersion = "new_notecard_version"
-        rules = {"conditions": {"notecard": currentVersion}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=currentVersion, hostVersion=None, rules=rules)
-        self.assertEqual(v, targetVersion)
-
-        # Test with None target version
-        targetVersion = None
-        rules = {"conditions": {"notecard": currentVersion}, "targetVersions": targetVersion}
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=currentVersion, hostVersion=None, rules=rules)
-        self.assertIsNone(v)
-
-        # Test with dict target version - notecard
-        targetVersion = "new_notecard_version"
-        rules = {"conditions": {"notecard": currentVersion}, "targetVersions": {"notecard": targetVersion}}
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=currentVersion, hostVersion=None, rules=rules)
-        self.assertEqual(v.get("notecard"), targetVersion)
-
-        # Test with dict target version - host
-        targetVersion = "new_host_version"
-        rules = {"conditions": {"notecard": currentVersion}, "targetVersions": {"host": targetVersion}}
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=currentVersion, hostVersion=None, rules=rules)
-        self.assertEqual(v.get("host"), targetVersion)
-        self.assertIsNone(v.get("notecard"))
-
-    def test_rules_host_rule_string(self):
-        """Test host rules with string conditions and various target version formats."""
-        currentVersion = "host_version_info"
-        targetVersion = "new_host_version"
-        rules = {"conditions": {"host": currentVersion}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=currentVersion, rules=rules)
-        self.assertEqual(v, targetVersion)
-
-        # Test with None target version
-        targetVersion = None
-        rules = {"conditions": {"host": currentVersion}, "targetVersions": targetVersion}
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=currentVersion, rules=rules)
-        self.assertIsNone(v)
-
-        # Test with dict target version - host
-        targetVersion = "new_host_version"
-        rules = {"conditions": {"host": currentVersion}, "targetVersions": {"host": targetVersion}}
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=currentVersion, rules=rules)
-        self.assertEqual(v.get("host"), targetVersion)
-
-        # Test with dict target version - notecard
-        targetVersion = "new_notecard_version"
-        rules = {"conditions": {"host": currentVersion}, "targetVersions": {"notecard": targetVersion}}
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=currentVersion, rules=rules)
-        self.assertEqual(v.get("notecard"), targetVersion)
-        self.assertIsNone(v.get("host"))
-
-    def test_rules_notecard_host_fleet_rule_string(self):
-        """Test complex rules with notecard, host, and fleet conditions."""
-        currentHostVersion = "host_version_info"
-        currentNotecardVersion = "notecard_version_info"
-        fleetUID = "my-fleet-uid"
-        targetVersion = "test-target-version"
-        rules = {
-            "conditions": {
-                "host": currentHostVersion,
-                "notecard": currentNotecardVersion,
-                "fleet": fleetUID
-            }, 
-            "targetVersions": targetVersion
+    def test_arbitrary_field_string_conditions(self):
+        """Test string conditions work with arbitrary field names."""
+        device_data = {
+            "notecard": "8.1.3",
+            "host": "3.1.2", 
+            "fleet": "production",
+            "deviceType": "sensor",
+            "location": "outdoor",
+            "environment": "harsh"
         }
-
-        # All conditions match
-        _, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID, 
-            notecardVersion=currentNotecardVersion, 
-            hostVersion=currentHostVersion, 
-            rules=rules
-        )
-        self.assertEqual(v, targetVersion)
-
-        # Fleet UID different
-        _, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID + "-is-different", 
-            notecardVersion=currentNotecardVersion, 
-            hostVersion=currentHostVersion, 
-            rules=rules
-        )
-        self.assertIsNone(v)
-
-        # Notecard version different
-        _, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID, 
-            notecardVersion=currentNotecardVersion + "-is-different", 
-            hostVersion=currentHostVersion, 
-            rules=rules
-        )
-        self.assertIsNone(v)
-
-        # Host version different
-        _, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID, 
-            notecardVersion=currentNotecardVersion, 
-            hostVersion=currentHostVersion + "-is-different", 
-            rules=rules
-        )
-        self.assertIsNone(v)
-
-    def test_rules_notecard_rule_is_function_returning_true(self):
-        """Test notecard rule with function condition that returns True."""
-        c = MagicMock()
-        c.return_value = True
-
-        currentVersion = "notecard_version_info"
-        targetVersion = "test-target-version"
-        rules = {"conditions": {"notecard": c}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=currentVersion, hostVersion=None, rules=rules)
         
-        self.assertEqual(v, targetVersion)
-        c.assert_called_once_with(currentVersion)
-
-    def test_rules_notecard_rule_is_function_returning_false(self):
-        """Test notecard rule with function condition that returns False."""
-        c = MagicMock()
-        c.return_value = False
-
-        currentVersion = "notecard_version_info"
-        targetVersion = "test-target-version"
-        rules = {"conditions": {"notecard": c}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=currentVersion, hostVersion=None, rules=rules)
+        # Test single field condition
+        rules = {"conditions": {"deviceType": "sensor"}, "targetVersions": {"notecard": "8.1.4"}}
+        _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(target_versions["notecard"], "8.1.4")
         
-        self.assertIsNone(v)
-        c.assert_called_once_with(currentVersion)
+        # Test multiple field conditions
+        rules = {
+            "conditions": {"deviceType": "sensor", "location": "outdoor", "environment": "harsh"}, 
+            "targetVersions": {"host": "3.1.3"}
+        }
+        _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(target_versions["host"], "3.1.3")
 
-    def test_rules_host_rule_is_function_returning_true(self):
-        """Test host rule with function condition that returns True."""
-        c = MagicMock()
-        c.return_value = True
-
-        currentVersion = "host_version_info"
-        targetVersion = "test-target-version"
-        rules = {"conditions": {"host": c}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=currentVersion, rules=rules)
+    def test_condition_mismatch(self):
+        """Test that mismatched conditions prevent rule from matching."""
+        device_data = {"deviceType": "gateway", "location": "indoor"}
         
-        self.assertEqual(v, targetVersion)
-        c.assert_called_once_with(currentVersion)
-
-    def test_rules_host_rule_is_function_returning_false(self):
-        """Test host rule with function condition that returns False."""
-        c = MagicMock()
-        c.return_value = False
-
-        currentVersion = "host_version_info"
-        targetVersion = "test-target-version"
-        rules = {"conditions": {"host": c}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=None, notecardVersion=None, hostVersion=currentVersion, rules=rules)
+        rules = {
+            "conditions": {"deviceType": "sensor", "location": "outdoor"}, 
+            "targetVersions": "should-not-match"
+        }
         
-        self.assertIsNone(v)
-        c.assert_called_once_with(currentVersion)
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)
+        self.assertIsNone(target_versions)
 
-    def test_rules_fleet_rule_is_function_returning_true(self):
-        """Test fleet rule with function condition that returns True."""
-        c = MagicMock()
-        c.return_value = True
-
-        fleetUID = "my-fleet-uid"
-        targetVersion = "test-target-version"
-        rules = {"conditions": {"fleet": c}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=fleetUID, notecardVersion=None, hostVersion=None, rules=rules)
+    def test_missing_device_fields(self):
+        """Test behavior when device data is missing fields referenced in conditions."""
+        device_data = {"field1": "value1"}  # Missing field2
         
-        self.assertEqual(v, targetVersion)
-        c.assert_called_once_with(fleetUID)
-
-    def test_rules_fleet_rule_is_function_returning_false(self):
-        """Test fleet rule with function condition that returns False."""
-        c = MagicMock()
-        c.return_value = False
-
-        fleetUID = "my-fleet-uid"
-        targetVersion = "test-target-version"
-        rules = {"conditions": {"fleet": c}, "targetVersions": targetVersion}
-
-        _, v = getFirmwareUpdateTargets(fleetUID=fleetUID, notecardVersion=None, hostVersion=None, rules=rules)
+        rules = {"conditions": {"field1": "value1", "field2": "value2"}, "targetVersions": "update"}
         
-        self.assertIsNone(v)
-        c.assert_called_once_with(fleetUID)
+        # Should not match because field2 is missing (None != "value2")
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)
+        self.assertIsNone(target_versions)
 
-    def test_rules_precedence(self):
-        """Test that rules are processed in order of precedence (first match wins)."""
-        ncTarget = "notecard-target-version"
-        hostTarget = "host-target-version"
-
-        fleetUID = "my-fleet-uid"
-        desiredNotecardVersion = "desired-notecard-version"
-        desiredHostVersion = "desired-host-version"
+    def test_callable_conditions(self):
+        """Test that callable conditions work with arbitrary fields."""
+        device_data = {
+            "version": "1.2.3",
+            "temperature": 25.5,
+            "batteryLevel": 85
+        }
         
         rules = [
             {
+                "id": "version-check",
                 "conditions": {
-                    "fleet": fleetUID, 
-                    "notecard": desiredNotecardVersion, 
-                    "host": desiredHostVersion
+                    "version": lambda v: v and v.startswith("1.2"),
+                    "temperature": lambda t: t and t > 20,
+                    "batteryLevel": lambda b: b and b > 80
                 },
-                "targetVersions": None,
-                "id": "have-desired-versions"
-            },
-            {
-                "conditions": {
-                    "fleet": fleetUID, 
-                    "notecard": "un" + desiredNotecardVersion, 
-                    "host": desiredHostVersion
-                },
-                "targetVersions": ncTarget,
-                "id": "correct-host-incorrect-notecard"
-            },
-            {
-                "conditions": {
-                    "fleet": fleetUID
-                },
-                "targetVersions": hostTarget,
-                "id": "all-remaining-options"
+                "targetVersions": {"firmware": "1.2.4"}
             }
         ]
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "version-check")
+        self.assertEqual(target_versions["firmware"], "1.2.4")
 
-        # Test fallback to third rule
-        r, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID, 
-            notecardVersion="un" + desiredNotecardVersion, 
-            hostVersion="un" + desiredHostVersion, 
-            rules=rules
-        )
-        self.assertEqual(v, hostTarget)
-        self.assertEqual(r, "all-remaining-options")
+    def test_callable_condition_returns_false(self):
+        """Test that callable conditions returning false prevent matching."""
+        device_data = {"batteryLevel": 15}
+        
+        rules = {
+            "conditions": {"batteryLevel": lambda b: b and b > 50},
+            "targetVersions": "should-not-match"
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)
+        self.assertIsNone(target_versions)
 
-        # Test second rule match
-        r, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID, 
-            notecardVersion="un" + desiredNotecardVersion, 
-            hostVersion=desiredHostVersion, 
-            rules=rules
-        )
-        self.assertEqual(v, ncTarget)
-        self.assertEqual(r, "correct-host-incorrect-notecard")
+    def test_mixed_condition_types(self):
+        """Test mixing string and callable conditions."""
+        device_data = {
+            "deviceType": "sensor",
+            "firmware": "2.1.0",
+            "signalStrength": -65
+        }
+        
+        rules = {
+            "id": "mixed-conditions",
+            "conditions": {
+                "deviceType": "sensor",  # String condition
+                "firmware": lambda v: v and v.startswith("2."),  # Callable condition
+                "signalStrength": lambda s: s and s > -70  # Callable condition
+            },
+            "targetVersions": {"firmware": "2.1.1"}
+        }
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "mixed-conditions")
+        self.assertEqual(target_versions["firmware"], "2.1.1")
 
-        # Test first rule match (highest precedence)
-        r, v = getFirmwareUpdateTargets(
-            fleetUID=fleetUID, 
-            notecardVersion=desiredNotecardVersion, 
-            hostVersion=desiredHostVersion, 
-            rules=rules
-        )
-        self.assertIsNone(v)
-        self.assertEqual(r, "have-desired-versions")
+    def test_rule_precedence(self):
+        """Test that rules are processed in order (first match wins)."""
+        device_data = {"environment": "production", "criticality": "high"}
+        
+        rules = [
+            {
+                "id": "first-rule",
+                "conditions": {"environment": "production"},
+                "targetVersions": {"version": "1.0.0"}
+            },
+            {
+                "id": "second-rule", 
+                "conditions": {"environment": "production", "criticality": "high"},
+                "targetVersions": {"version": "2.0.0"}
+            }
+        ]
+        
+        # Should match first rule even though second rule also matches
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "first-rule")
+        self.assertEqual(target_versions["version"], "1.0.0")
+
+    def test_target_version_formats(self):
+        """Test different target version formats."""
+        device_data = {"deviceType": "test"}
+        
+        # String target version
+        rules = {"conditions": {"deviceType": "test"}, "targetVersions": "string-version"}
+        _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(target_versions, "string-version")
+        
+        # Dictionary target version
+        rules = {"conditions": {"deviceType": "test"}, "targetVersions": {"fw1": "1.0", "fw2": "2.0"}}
+        _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(target_versions["fw1"], "1.0")
+        self.assertEqual(target_versions["fw2"], "2.0")
+        
+        # None target version (no updates needed)
+        rules = {"conditions": {"deviceType": "test"}, "targetVersions": None}
+        _, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(target_versions)
+
+    def test_complex_real_world_scenario(self):
+        """Test a complex real-world scenario with multiple device types and conditions."""
+        # Outdoor sensor device data
+        outdoor_sensor_data = {
+            "notecard": "8.1.2",
+            "host": "3.1.1",
+            "deviceType": "sensor", 
+            "location": "outdoor",
+            "fleet": "production",
+            "batteryLevel": 90,
+            "signalStrength": -55
+        }
+        
+        rules = [
+            {
+                "id": "desired-state",
+                "conditions": {
+                    "notecard": "8.1.3",
+                    "host": "3.1.2",
+                    "fleet": "production"
+                },
+                "targetVersions": None  # Already at desired versions
+            },
+            {
+                "id": "outdoor-sensor-update",
+                "conditions": {
+                    "deviceType": "sensor",
+                    "location": "outdoor", 
+                    "fleet": "production",
+                    "batteryLevel": lambda b: b and b > 50
+                },
+                "targetVersions": {
+                    "notecard": "8.1.3",
+                    "host": "3.1.2"
+                }
+            },
+            {
+                "id": "emergency-update",
+                "conditions": {
+                    "signalStrength": lambda s: s and s < -80
+                },
+                "targetVersions": {"notecard": "8.1.4-emergency"}
+            }
+        ]
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(outdoor_sensor_data, rules=rules)
+        self.assertEqual(rule_id, "outdoor-sensor-update")
+        self.assertEqual(target_versions["notecard"], "8.1.3")
+        self.assertEqual(target_versions["host"], "3.1.2")
+
+    def test_no_rules_match(self):
+        """Test when no rules match the device data."""
+        device_data = {"deviceType": "unknown"}
+        
+        rules = [
+            {"conditions": {"deviceType": "sensor"}, "targetVersions": "sensor-update"},
+            {"conditions": {"deviceType": "gateway"}, "targetVersions": "gateway-update"}
+        ]
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertIsNone(rule_id)
+        self.assertIsNone(target_versions)
+
+    def test_empty_device_data(self):
+        """Test behavior with empty device data."""
+        rules = {"conditions": {"someField": "someValue"}, "targetVersions": "update"}
+        
+        rule_id, target_versions = getFirmwareUpdateTargets({}, rules=rules)
+        self.assertIsNone(rule_id)
+        self.assertIsNone(target_versions)
+
+    def test_single_rule_as_dict(self):
+        """Test passing a single rule as dict instead of list."""
+        device_data = {"status": "active"}
+        rules = {"conditions": {"status": "active"}, "targetVersions": "single-rule-update"}
+        
+        rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules=rules)
+        self.assertEqual(rule_id, "rule-1")  # Auto-generated ID
+        self.assertEqual(target_versions, "single-rule-update")
 
 
 if __name__ == '__main__':
