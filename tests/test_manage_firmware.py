@@ -311,10 +311,11 @@ class TestRequestUpdateToTargetVersion(unittest.TestCase):
         # Mock cache retrieval to raise exception
         self.mock_cache.retrieve.side_effect = Exception("Version not found")
         
-        with self.assertRaises(Exception):
-            manage_firmware.requestUpdateToTargetVersion(
-                self.mock_project, 'device123', current_version, target_versions, 'notecard'
-            )
+        result = manage_firmware.requestUpdateToTargetVersion(
+            self.mock_project, 'device123', current_version, target_versions, 'notecard'
+        )
+        
+        self.assertIn("Cannot update notecard:", result)
 
     def test_invalid_cache_file(self):
         """Test when cache returns None for file."""
@@ -324,12 +325,11 @@ class TestRequestUpdateToTargetVersion(unittest.TestCase):
         # Mock cache to return None
         self.mock_cache.retrieve.return_value = None
         
-        with self.assertRaises(Exception) as context:
-            manage_firmware.requestUpdateToTargetVersion(
-                self.mock_project, 'device123', current_version, target_versions, 'notecard'
-            )
+        result = manage_firmware.requestUpdateToTargetVersion(
+            self.mock_project, 'device123', current_version, target_versions, 'notecard'
+        )
         
-        self.assertIn("Unable to locate notecard firmware image", str(context.exception))
+        self.assertIn("Cannot update notecard:", result)
 
 
 class TestManageFirmware(unittest.TestCase):
@@ -475,6 +475,157 @@ class TestManageFirmware(unittest.TestCase):
         
         # Verify requestDeviceFirmwareUpdate was called for both firmware types
         self.assertEqual(self.mock_project.requestDeviceFirmwareUpdate.call_count, 2)
+    
+    def test_dry_run_no_rule_conditions_met(self):
+        """Test dry-run mode when no rule conditions are met."""
+        device_data = {
+            'fleets': ['fleet123'],
+            'firmware_notecard': {'version': '8.1.3'},
+            'firmware_host': {'version': '3.1.2'}
+        }
+        result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, [], is_dry_run=True
+        )
+        
+        self.assertEqual(result, "Dry-Run: No rule conditions met. No updates required")
+        
+    def test_dry_run_rule_met_no_updates_required(self):
+        """Test dry-run mode when rule is met but no updates required."""
+        rules = [{"id": "rule-1", "conditions": None, "target_versions": None}]
+        device_data = {
+            'fleets': ['fleet123'],
+            'firmware_notecard': {'version': '8.1.3'},
+            'firmware_host': {'version': '3.1.2'}
+        }
+        
+        result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, rules, is_dry_run=True
+        )
+        
+        self.assertEqual(result, "Dry-Run: According to rule id rule-1, firmware requirements met, no updates required")
+    
+    def test_dry_run_notecard_update_in_progress(self):
+        """Test dry-run mode when notecard update is already in progress."""
+        rules = [{"id": "rule-1", "conditions": None, "target_versions": {"notecard": "8.1.4"}}]
+        device_data = {
+            'fleets': ['fleet123'],
+            'firmware_notecard': {'version': '8.1.3'},
+            'firmware_host': {'version': '3.1.2'}
+        }
+        
+        # Mock notecard update in progress
+        self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {
+            'dfu_in_progress': True
+        }
+        
+        result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, rules, is_dry_run=True
+        )
+        
+        self.assertEqual(
+            result, 
+            "Dry-Run: According to rule id rule-1, firmware requirements NOT met.  Update not requested because Notecard update is in progress"
+        )
+        self.mock_project.getDeviceFirmwareUpdateStatus.assert_called_once_with('device123', 'notecard')
+    
+    def test_dry_run_successful_firmware_updates(self):
+        """Test dry-run mode for successful firmware update checks."""
+        rules = [{"id": "rule-1", "conditions": None, "target_versions": {"notecard": "8.1.4", "host": "3.1.3"}}]
+        device_data = {
+            'fleets': ['fleet123'],
+            'firmware_notecard': {'version': '8.1.3'},
+            'firmware_host': {'version': '3.1.2'}
+        }
+        
+        # Mock no updates in progress
+        self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {'dfu_in_progress': False}
+        
+        # Mock the cache retrieval to return valid firmware files
+        manage_firmware.firmwareCache.cache = {
+            'notecard': {'8.1.4': 'notecard-8.1.4.bin'},
+            'host': {'3.1.3': 'host-3.1.3.bin'}
+        }
+        manage_firmware.firmwareCache.cache_expiry = time.time() + 1000
+        
+        result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, rules, is_dry_run=True
+        )
+        
+        expected_result = ("Dry-Run: According to rule id rule-1, "
+                          "Would request notecard firmware update from 8.1.3 to 8.1.4. "
+                          "Would request host firmware update from 3.1.2 to 3.1.3.")
+        self.assertEqual(result, expected_result)
+        
+        # Verify requestDeviceFirmwareUpdate was NOT called in dry-run mode
+        self.mock_project.requestDeviceFirmwareUpdate.assert_not_called()
+    
+    def test_dry_run_already_at_target_version(self):
+        """Test dry-run mode when device is already at target version."""
+        rules = [{"id": "rule-1", "conditions": None, "target_versions": {"notecard": "8.1.3", "host": "3.1.2"}}]
+        device_data = {
+            'fleets': ['fleet123'],
+            'firmware_notecard': {'version': '8.1.3'},  # Already at target
+            'firmware_host': {'version': '3.1.2'}       # Already at target
+        }
+        
+        # Mock no updates in progress
+        self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {'dfu_in_progress': False}
+        
+        result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, rules, is_dry_run=True
+        )
+        
+        expected_result = ("Dry-Run: According to rule id rule-1, "
+                          "Skipping update request for notecard. Already at target version of 8.1.3. "
+                          "Skipping update request for host. Already at target version of 3.1.2.")
+        self.assertEqual(result, expected_result)
+        
+        # Verify requestDeviceFirmwareUpdate was NOT called
+        self.mock_project.requestDeviceFirmwareUpdate.assert_not_called()
+    
+    def test_normal_vs_dry_run_comparison(self):
+        """Test that normal and dry-run modes behave differently for the same scenario."""
+        rules = [{"id": "rule-1", "conditions": None, "target_versions": {"notecard": "8.1.4"}}]
+        device_data = {
+            'fleets': ['fleet123'],
+            'firmware_notecard': {'version': '8.1.3'},
+            'firmware_host': {'version': '3.1.2'}
+        }
+        
+        # Mock no updates in progress
+        self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {'dfu_in_progress': False}
+        
+        # Mock the cache retrieval
+        manage_firmware.firmwareCache.cache = {
+            'notecard': {'8.1.4': 'notecard-8.1.4.bin'},
+            'host': {}
+        }
+        manage_firmware.firmwareCache.cache_expiry = time.time() + 1000
+        
+        # Test dry-run mode
+        dry_run_result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, rules, is_dry_run=True
+        )
+        
+        # Reset the mock
+        self.mock_project.reset_mock()
+        self.mock_project.getDeviceFirmwareUpdateStatus.return_value = {'dfu_in_progress': False}
+        
+        # Test normal mode  
+        normal_result = manage_firmware.manageFirmware(
+            self.mock_project, 'device123', device_data, rules, is_dry_run=False
+        )
+        
+        # Check that dry-run has prefix and "Would request"
+        self.assertTrue(dry_run_result.startswith("Dry-Run:"))
+        self.assertIn("Would request", dry_run_result)
+        
+        # Check that normal mode doesn't have prefix and has "Requested"
+        self.assertFalse(normal_result.startswith("Dry-Run:"))
+        self.assertIn("Requested", normal_result)
+        
+        # Verify that in normal mode, requestDeviceFirmwareUpdate was called
+        self.mock_project.requestDeviceFirmwareUpdate.assert_called_once()
 
 
 if __name__ == '__main__':

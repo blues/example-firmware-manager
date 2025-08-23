@@ -65,32 +65,58 @@ def fetchDeviceFirmwareInfo(project, deviceUID, firmwareType):
     return d.get("current",{})
     
 
-def requestUpdateToTargetVersion(project, deviceUID, currentVersion, target_versions, firmwareType):
-    #global firmwareCache
-
+def checkUpdateToTargetVersion(project, deviceUID, currentVersion, target_versions, firmwareType):
+    """
+    Check if a firmware update should be performed and validate the request.
+    
+    Returns:
+        tuple: (should_update: bool, message: str, target_version: str, filename: str)
+    """
     fw = target_versions.get(firmwareType)
     
     if (fw is None):
-        return f"No firmware update request for {firmwareType}"
+        return False, f"No firmware update request for {firmwareType}", None, None
 
     if (fw == currentVersion):
-        return F"Skipping update request for {firmwareType}. Already at target version of {fw}."
+        return False, f"Skipping update request for {firmwareType}. Already at target version of {fw}.", fw, None
     
-    file = firmwareCache.retrieve(project, firmwareType, fw)
+    try:
+        file = firmwareCache.retrieve(project, firmwareType, fw)
+        if file is None:
+            raise(Exception(f"Unable to locate {firmwareType} firmware image for requested version {fw}"))
+        return True, f"Would request {firmwareType} firmware update from {currentVersion} to {fw}.", fw, file
+    except Exception as e:
+        return False, f"Cannot update {firmwareType}: {str(e)}", fw, None
 
-    if file is None:
-        raise(Exception(f"Unable to locate {firmwareType} firmware image for requested version {fw}"))
+
+def executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, currentVersion, targetVersion):
+    """
+    Execute the actual firmware update request to Notehub.
+    """
+    project.requestDeviceFirmwareUpdate(deviceUID, filename, firmwareType)
+    return f"Requested {firmwareType} firmware update from {currentVersion} to {targetVersion}."
+
+
+def requestUpdateToTargetVersion(project, deviceUID, currentVersion, target_versions, firmwareType):
+    """
+    Legacy function that combines check and execute for backward compatibility.
+    """
+    should_update, message, target_version, filename = checkUpdateToTargetVersion(
+        project, deviceUID, currentVersion, target_versions, firmwareType
+    )
     
-    project.requestDeviceFirmwareUpdate(deviceUID, file, firmwareType)
-
-    return f"Requested {firmwareType} firmware update from {currentVersion} to {fw}."
+    if not should_update:
+        return message
+    
+    # Execute the update
+    return executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, currentVersion, target_version)
 
     
 
 
 
 
-def manageFirmware(project, deviceUID, device_data, rules={}):
+def manageFirmware(project, deviceUID, device_data, rules={}, is_dry_run=False):
 
     if device_data.get("firmware_notecard") is None:
         device_data["firmware_notecard"] = fetchDeviceFirmwareInfo(project, deviceUID, FirmwareType.Notecard)
@@ -101,24 +127,26 @@ def manageFirmware(project, deviceUID, device_data, rules={}):
     
     (ruleID, target_versions) = getFirmwareUpdateTargets(device_data, rules)
 
+    dry_run_prefix = "Dry-Run: " if is_dry_run else ""
+    
     if ruleID is None:
-        return "No rule conditions met. No updates required"
+        return f"{dry_run_prefix}No rule conditions met. No updates required"
     
     ruleMessage = f"According to rule id {ruleID},"
     updateNotRequired = target_versions is None
     if updateNotRequired:
-        return f"{ruleMessage} firmware requirements met, no updates required"
+        return f"{dry_run_prefix}{ruleMessage} firmware requirements met, no updates required"
     
     
     updateStatus = project.getDeviceFirmwareUpdateStatus(deviceUID, FirmwareType.Notecard)
 
     if updateStatus.get("dfu_in_progress", False):
-        return f"{ruleMessage} firmware requirements NOT met.  Update not requested because Notecard update is in progress"
+        return f"{dry_run_prefix}{ruleMessage} firmware requirements NOT met.  Update not requested because Notecard update is in progress"
     
     updateStatus = project.getDeviceFirmwareUpdateStatus(deviceUID, FirmwareType.Host)
 
     if updateStatus.get("dfu_in_progress", False):
-        return f"{ruleMessage} firmware requirements NOT met.  Update not requested because Host update is in progress"
+        return f"{dry_run_prefix}{ruleMessage} firmware requirements NOT met.  Update not requested because Host update is in progress"
     
 
     # Extract current versions from device_data for update requests
@@ -126,10 +154,20 @@ def manageFirmware(project, deviceUID, device_data, rules={}):
     hostFirmwareVersion = device_data.get("firmware_host", {}).get("version")
     
     
-    ncMessage   = requestUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
-    hostMessage = requestUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
+    if is_dry_run:
+        # In dry-run mode, only check what updates would be performed
+        nc_should_update, ncMessage, _, _ = checkUpdateToTargetVersion(
+            project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard
+        )
+        host_should_update, hostMessage, _, _ = checkUpdateToTargetVersion(
+            project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host
+        )
+    else:
+        # Normal mode - actually perform updates
+        ncMessage   = requestUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
+        hostMessage = requestUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
 
-    m = " ".join([ruleMessage, ncMessage, hostMessage])
+    m = " ".join([f"{dry_run_prefix}{ruleMessage}", ncMessage, hostMessage])
     
     return m
 

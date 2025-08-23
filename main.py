@@ -5,6 +5,22 @@ from manage_firmware import manageFirmware
 from notehub import NotehubProject
 from rules import DevicesInUpdateFleet
 
+def str_to_bool(value):
+      """
+      Convert a string representation of a boolean to its boolean equivalent.
+      Returns False for None input.
+      
+      Args:
+          value: String or None
+          
+      Returns:
+          bool: True for 'true', '1', 'yes', 'on' (case-insensitive), False 
+  otherwise
+      """
+      if value is None:
+          return False
+      return str(value).lower() in ('true', '1', 'yes', 'on')
+
 def retrieveAuthToken():
     return os.getenv("FIRMWARE_CHECK_AUTH_TOKEN")
 
@@ -17,23 +33,15 @@ def connectToNotehubProject():
 
 project = None
 
-def processRoutedSession(deviceUID, payload):
+def processRoutedSession(deviceUID, payload, is_dry_run):
 
-    
-
-    notecardFirmwareVersion = payload.get("notecard_firmware")
-    hostFirmwareVersion = payload.get("host_firmware")
-    fleets = payload.get("fleets", [])
-
-    # for now, assume only a single fleet if any
-    fleet = None if len(fleets) == 0 else fleets[0]
 
     global project
 
     if project is None:
         project = connectToNotehubProject()
 
-    return manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareVersion, rules=DevicesInUpdateFleet)
+    return manageFirmware(project, deviceUID, payload, rules=DevicesInUpdateFleet, is_dry_run=is_dry_run)
 
 def lambda_handler(event, context):
     result = authenticate_request(event, retrieveAuthToken())
@@ -55,7 +63,12 @@ def lambda_handler(event, context):
                 'body': "bad request. missing valid device UID from the request"
             }
         
-        r = processRoutedSession(deviceUID, payload)
+        is_dry_run = bool( str_to_bool(payload.get('is_dry_run')) 
+                        or str_to_bool(event.get("headers",{}).get('x-dry-run'))
+                        or str_to_bool(event.get("queryStringParameters",{}).get('is_dry_run'))
+                    )
+        
+        r = processRoutedSession(deviceUID, payload, is_dry_run)
     except Exception as e:
         return {
             'statusCode': 500,

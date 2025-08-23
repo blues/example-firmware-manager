@@ -142,6 +142,42 @@ curl -X POST https://your-endpoint.com/firmware-check \
   -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
 ```
 
+#### Dry-Run Mode
+
+To test firmware update logic without making actual update requests, add the `is_dry_run` flag to your request:
+
+**In Request Body:**
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"], "is_dry_run": true}'
+```
+
+**As Query Parameter:**
+```bash
+curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+**As Header:**
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "x-dry-run: true" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+When `is_dry_run` is enabled:
+- Rules engine executes normally to determine required updates
+- Firmware update validation occurs (checking available versions)
+- **No actual firmware update requests are sent to Notehub**
+- Response messages are prefixed with "Dry-Run: "
+- Returns "Would request" instead of "Requested" in update messages
+
 ### Authentication Errors
 
 The system returns specific error messages for authentication failures:
@@ -219,66 +255,69 @@ rules = [
 
 ### Initial Testing
 
-Use the `DEFAULT_RULES` set by importing from `rules.py` in the `main.py` script.
+For initial testing, use the dry-run functionality instead of special testing rules:
 
-```python
-from rules import DEFAULT_RULES
+```bash
+# Test your actual rules without making firmware update requests
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"], "is_dry_run": true}'
 ```
 
-Configure the call to `manage_firmware` to use the DEFAULT_RULES set.
+This approach allows you to:
+- Test your actual production rules safely
+- Verify rule conditions are met as expected  
+- See what firmware updates would be requested
+- Validate the complete firmware update logic
+- Get "Dry-Run: " prefixed messages showing intended actions
 
-```python
-manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareVersion, rules=DevicesInUpdateFleet)
-```
+The dry-run mode executes the complete rules engine and firmware validation without making actual update requests to Notehub, making it ideal for testing and development.
 
-The DEFAULT_RULES will accept any configuration of Fleet, Notecard firmware, and Host MCU firmware.  They will _not_ request any firmware updates of the device to a target version. They will also be identified as `"default"`.
-
-This makes it possible to test the functions and the Notehub route without worrying about accidentally affecting devices in your Notehub project until you are sure all the different components are working.
-
-When executed successfully from a Notehub route, the route should receive a message that the default rule was followed, and that no firmware update requests were made.
-
-### Rules Condition Testing
+### Rules Development and Testing
 
 When developing a set of rules, edit the `rules.py` file.
 
 A rule set is a list of dictionaries, each item in the list defines a set of conditions and target firmware versions.
 
-Each rule has an `id`, a set of `conditions` and `target_versions`.  _IF_ all of the `conditions` are met for a specific rule, then updates to the firmware versions in the `target_versions` are requested.
+Each rule has an `id`, a set of `conditions` and `target_versions`. _IF_ all of the `conditions` are met for a specific rule, then updates to the firmware versions in the `target_versions` are requested.
 
-**For testing** rule conditions it is recommended to set the `target_versions` value to `None`.
-
-When a rule is executed by `manage_firmware`, it will return the rule identifier where the conditions were met.
-
-This enables you to test if rule `conditions` are being met as expected without invoking a firmware update request to the device.
+**For testing** rule conditions, use the dry-run functionality rather than setting `target_versions` to `None`.
 
 ```python
 My_Rule_Set = [
     {
-        "id":"highest-precedent-rule",
+        "id":"desired-state-rule",
         "conditions":{
-            "firmware_notecard": "8.1.3.1754",
-            "firmware_host": "3.1.2",
+            "firmware_notecard.version": "8.1.3.1754",
+            "firmware_host.version": "3.1.2",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "target_versions": None  # Do not request firmware update
+        "target_versions": None  # Device already at desired versions
     },
     {
-        "id":"next-highest-precedent-rule",
+        "id":"update-from-old-version",
         "conditions":{
-            "firmware_notecard": "7.5.4.345",
-            "firmware_host": "3.1.1",
+            "firmware_notecard.version": "7.5.4.345",
+            "firmware_host.version": "3.1.1",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "target_versions":None
+        "target_versions":{
+            "notecard":"8.1.3.1754",
+            "host":"3.1.2"
+        }
     },
     {
-        "id":"lowest-precedent-rule",
+        "id":"update-legacy-firmware",
         "conditions":{
-            "firmware_notecard": "6.2.3.123",
-            "firmware_host": "2.1",
+            "firmware_notecard.version": "6.2.3.123",
+            "firmware_host.version": "2.1",
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "target_versions":None
+        "target_versions":{
+            "notecard":"8.1.3.1754",
+            "host":"3.1.2"
+        }
     }
 ]
 ```
@@ -289,10 +328,14 @@ Once you have created your rule set, be sure to import it into `main.py` and inc
 from rules import My_Rule_Set
 ```
 
-Configure the call to `manage_firmware` to use the My_Rule_Set set.
+Test your rules safely using dry-run mode:
 
-```python
-manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareVersion, rules=My_Rule_Set)
+```bash
+# Test rule conditions and see what updates would be made
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def-ghi-jklmno"], "is_dry_run": true}'
 ```
 
 ### Apply Target Firmware to Rules
