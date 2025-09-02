@@ -4,11 +4,44 @@ _Python Edition_
 
 Enforce Notecard and Host firmware combinations, and provide rules for when to update Notecard and Host MCU firmware.
 
-Rules in this example can be based on
+## Key Features
 
-- Notecard firmware version
-- Host MCU firmware version
-- Notecard fleet membership
+- **🛡️ Secure Authentication**: Multiple authentication methods with robust security features
+- **🧪 Dry-Run Testing**: Test firmware update logic safely without making actual requests  
+- **⚡ Flexible Rules Engine**: Support for arbitrary device fields and complex conditions
+- **📊 100% Test Coverage**: Comprehensive unit tests ensure reliability
+- **🔄 Intelligent Caching**: Optimized firmware version caching to reduce API calls
+- **🎯 Dot Notation Support**: Access nested object properties in rule conditions
+
+## Quick Start with Dry-Run Testing
+
+**🚨 IMPORTANT**: Always test your firmware update routes with dry-run mode first!
+
+```bash
+# Test your route safely - no actual firmware updates will be made
+curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+This will:
+- ✅ Execute your complete rules engine logic
+- ✅ Validate firmware versions and availability  
+- ✅ Show what updates *would* be requested
+- ❌ **Not make any actual firmware update requests**
+- 📝 Return messages prefixed with "Dry-Run: "
+
+Once you've verified the dry-run behavior is correct, you can enable the route for automated firmware updates.
+
+Rules in this example can be based on **any device characteristics**, including:
+
+- Notecard firmware version (`firmware_notecard`)
+- Host MCU firmware version (`firmware_host`)  
+- Fleet membership (`fleets`)
+- Device type, location, environment conditions
+- Custom device properties and metadata
+- Any other device field available in your system
 
 This example assumes the firmware version rule checks and subsequent firmware update requests are invoked by execution of a Notehub route.  That is, this is driven by Notecard event behavior rather than assigning a specific period.
 
@@ -28,9 +61,15 @@ All of the following configurations can be applied to any of the appropriate Not
 |Notefiles|Selected Notefiles| |
 |Include Other Notefiles|_session.qo| |
 |Transform Data|JSONata Expression| |
-|JSONata Expression| `($not(body.opened) ? $doNotRoute(): {"device":device, "fleets":fleets})` | Filter to only session opening events, and only provide the necessary data required for the firmware check|
-|**For Testing**| |When testing the route setup and configuration, also apply the following|
-|Enable this route| off (false) | Will show `(Currently disabled)` on Route UI when set to off|
+|JSONata Expression| `((body.closed) ? $doNotRoute(): $)` | Exclude session closing events. Send the entire Note to the firmware check otherwise|
+|**For Authorization**| |When using with AWS Lambda URL or custom RESTful API, add an authorization token to the request headers|
+|HTTP Headers|Additional Headers|Enable inclusion of additional request headers|
+|Header name|x-api-key||
+|Header value|your-custom-token||
+|**For Testing**||When testing the route setup and configuration, also apply the following|
+|HTTP Headers|Additional Headers|Enable inclusion of additional request headers|
+|Header name|x-dry-run||
+|Header value|true||
 
 ---
 > **❗IMPORTANT**
@@ -39,11 +78,24 @@ All of the following configurations can be applied to any of the appropriate Not
 
 ### Testing Routes
 
+**Recommended Testing Approach:**
+
+1. **Start with Dry-Run Mode**: Always test your route with `is_dry_run=true` first
+   ```bash
+   curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+     -H "Authorization: Bearer your-token" \
+     -H "Content-Type: application/json" \
+     -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+   ```
+
+2. **Manual Event Routing**: Test with existing Notehub events without affecting live devices
+
 It is possible in Notehub to manually route an existing event in Notehub to any route, including a disabled route.
 
 <https://dev.blues.io/notehub/notehub-walkthrough/#manually-routing-events>
 
-By disabling the route, it prevents it from being executed automatically from events generated in Notehub while the route is being tested and developed. But it can still be executed manually using existing event data in Notehub.
+
+**⚠️ Safety Tip**: The dry-run mode provides an additional safety layer - even if you accidentally manually trigger it, no actual firmware updates will occur when `is_dry_run=true`.
 
 ## Authentication and Script Environment Configuration
 
@@ -78,79 +130,344 @@ You will want to create the following environment variables with the values obta
 |NOTEHUB_CLIENT_ID|`<client id obtained above>`|
 |NOTEHUB_CLIENT_SECRET|`<client secret obtained above>`|
 |NOTEHUB_PROJECT_UID|`<app:xxxxx-xxxx-xxxx-xxxx-xxxxx>`|
+|FIRMWARE_CHECK_AUTH_TOKEN|`<endpoint-authorization-token>`|
 
 > **❗IMPORTANT**
 > 
 > Do not store these values in source control.
 
+## Request Authorization
+
+This system includes authentication capabilities to secure access to the firmware management endpoints. The `auth.py` module provides comprehensive request authentication using various header formats.
+
+### Supported Authentication Methods
+
+The system supports multiple authentication schemes for maximum flexibility:
+
+1. **Bearer Token** (Recommended)
+   ```
+   Authorization: Bearer <your-token>
+   ```
+
+2. **Direct Token** in Authorization Header
+   ```
+   Authorization: <your-token>
+   ```
+
+3. **API Key Header**
+   ```
+   x-api-key: <your-token>
+   ```
+
+### Authentication Behavior
+
+- **Header Precedence**: The `x-api-key` header takes precedence over the `Authorization` header if both are present
+- **Case Insensitive**: All header names are processed case-insensitively (e.g., `AUTHORIZATION`, `X-API-KEY`)
+- **Whitespace Handling**: Tokens are automatically trimmed of leading/trailing whitespace
+- **Security**: Uses constant-time comparison (`hmac.compare_digest()`) to prevent timing attacks
+
+### Configuration
+
+To enable request authentication, configure your authentication token as an environment variable:
+
+```bash
+export FIRMWARE_CHECK_AUTH_TOKEN="your-secure-token-here"
+```
+
+### Example Usage
+
+#### Using Bearer Token (Recommended)
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+#### Using API Key Header
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "x-api-key: your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+### Authentication Errors
+
+The system returns specific error messages for authentication failures:
+
+- `Missing authorization header` - No authentication header provided
+- `Empty authorization token` - Authentication header is empty or contains only whitespace
+- `Invalid authorization token` - Token doesn't match the expected value
+- `Authentication not configured` - Server-side authentication token is not configured
+- `Authentication system error` - Internal error during authentication processing
+
+
+## Dry-Run Mode
+
+To test firmware update logic without making actual update requests, add the `is_dry_run` flag to your request:
+
+**In Request Body:**
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"], "is_dry_run": true}'
+```
+
+**As Query Parameter:**
+```bash
+curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+**As Header:**
+```bash
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "x-dry-run: true" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+When `is_dry_run` is enabled:
+- Rules engine executes normally to determine required updates
+- Firmware update validation occurs (checking available versions)
+- **No actual firmware update requests are sent to Notehub**
+- Response messages are prefixed with "Dry-Run: "
+- Returns "Would request" instead of "Requested" in update messages
+
+
 ## Rules Configuration
 
-The content of `rules.py` defines the sets of conditions that must be met in order to request an update to a target Notecard or Host firmware version.
+The rules engine provides a powerful and flexible system for defining firmware update conditions based on **any device characteristics**. Rules are evaluated against device data to determine when firmware updates should be applied.
 
-The selection of the rules set is made in the invocation of `manage_firmware` function in `main.py`
+### Generic Rules Engine
+
+The rules engine supports arbitrary field names in conditions, making it extensible beyond the traditional notecard/host/fleet model. You can create conditions based on:
+
+- **Firmware versions**: `firmware_notecard`, `firmware_host`
+- **Device characteristics**: `deviceType`, `location`, `environment`
+- **Operational data**: `batteryLevel`, `signalStrength`, `temperature`
+- **Custom fields**: Any field name your system provides
+
+### Device Data Structure
+
+Device data is passed as a dictionary to the rules engine. Firmware information is typically provided as JSON objects containing version details and other metadata:
+
+```python
+device_data = {
+    "firmware_notecard": {
+        "version": "notecard-8.1.3.17074",   # Full version string (may have prefix)
+        "ver_major": 8,                      # Parsed major version (recommended for rules)
+        "ver_minor": 1,                      # Parsed minor version (recommended for rules)
+        "ver_patch": 3,                      # Parsed patch version (recommended for rules)
+        "ver_build": 17074,                  # Parsed build number (recommended for rules)
+        "built": "2024-01-15T10:30:00Z",
+        "type": "release",
+        "size": 2048576
+    },
+    "firmware_host": {
+        "version": "host-3.1.2",             # Full version string (may have prefix)
+        "ver_major": 3,                      # Parsed major version (recommended for rules)
+        "ver_minor": 1,                      # Parsed minor version (recommended for rules)
+        "ver_patch": 2,                      # Parsed patch version (recommended for rules)
+        "built": "2024-01-10T14:22:00Z",
+        "type": "production",
+        "size": 1024000,
+        "checksum": "abc123def456"
+    },
+    "fleets": ["fleet:production", "fleet:sensors"],  # List of fleet UIDs
+    "deviceType": "environmental-sensor",
+    "location": "outdoor",
+    "batteryLevel": 85,
+    "signalStrength": -65,
+    "environment": "harsh"
+}
+```
+
+### Version Field Handling
+
+The system automatically parses JSON string firmware data and extracts individual version components for reliable rule matching:
+
+```python
+# Firmware data can arrive as JSON strings (common from external systems)
+"firmware_notecard": '{"version":"notecard-6.2.5","ver_major":6,"ver_minor":2,"ver_patch":5,"ver_build":16868}'
+
+# System automatically parses this to:
+"firmware_notecard": {
+    "version": "notecard-6.2.5",
+    "ver_major": 6,        # Integer - reliable for comparisons
+    "ver_minor": 2,        # Integer - reliable for comparisons  
+    "ver_patch": 5,        # Integer - reliable for comparisons
+    "ver_build": 16868     # Integer - reliable for comparisons
+}
+```
+
+#### JSON String Parsing
+
+The system includes automatic JSON parsing for firmware fields that may arrive as JSON strings from external systems. This is handled in `main.py` through the `parse_firmware_fields()` function:
+
+```python
+# Input payload with JSON strings
+payload = {
+    "device": "dev:123456",
+    "firmware_notecard": '{"version":"notecard-8.1.3","ver_major":8,"ver_minor":1,"ver_patch":3}',
+    "firmware_host": '{"version":"host-3.1.2","ver_major":3,"ver_minor":1,"ver_patch":2}'
+}
+
+# Automatically parsed to structured data for rules engine
+parsed_payload = {
+    "device": "dev:123456",
+    "firmware_notecard": {
+        "version": "notecard-8.1.3",
+        "ver_major": 8,
+        "ver_minor": 1,
+        "ver_patch": 3
+    },
+    "firmware_host": {
+        "version": "host-3.1.2",
+        "ver_major": 3,
+        "ver_minor": 1,
+        "ver_patch": 2
+    }
+}
+```
+
+**Recommended Approach**: Use the parsed integer fields (`ver_major`, `ver_minor`, `ver_patch`, `ver_build`) in your rules instead of parsing version strings. This approach:
+
+- ✅ **Handles prefixes**: Works with `"notecard-6.2.5"`, `"host-3.1.2"`, etc.
+- ✅ **Reliable comparisons**: Integer comparisons are more reliable than string parsing
+- ✅ **Error-free**: Avoids parsing errors from version string variations
+- ✅ **Performance**: Integer comparisons are faster than string parsing
+
+### Dot Notation for Nested Objects
+
+The rules engine supports **dot notation** to access nested object properties. This is particularly useful for firmware objects that contain multiple fields:
+
+```python
+# Access firmware version fields from nested objects
+rules = [
+    {
+        "id": "firmware-version-check",
+        "conditions": {
+            # Recommended: Use parsed version fields for reliable comparisons
+            "firmware_notecard.ver_major": 8,                    # Exact major version match
+            "firmware_notecard.ver_minor": lambda minor: minor >= 1,  # Minor version >= 1
+            "firmware_host.ver_major": 3,                        # Host major version
+            "firmware_host.ver_minor": lambda minor: minor < 2,  # Host minor version < 2
+            
+            # Alternative: String-based version checking (works but not recommended for new rules)
+            "firmware_notecard.version": lambda v: v and v.endswith("17074"),
+            
+            # Other firmware metadata
+            "firmware_notecard.type": "release",                 # Check firmware type
+            "firmware_host.built": lambda date: "2024-01" in date  # Check build date
+        },
+        "target_versions": {
+            "notecard": "8.1.4",
+            "host": "3.1.3"
+        }
+    }
+]
+```
 
 ### Initial Testing
 
-Use the `DEFAULT_RULES` set by importing from `rules.py` in the `main.py` script.
+For initial testing, use the dry-run functionality instead of special testing rules:
 
-```python
-from rules import DEFAULT_RULES
+```bash
+# Test your actual rules without making firmware update requests
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -H "x-dry-run: true" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
 ```
 
-Configure the call to `manage_firmware` to use the DEFAULT_RULES set.
+This approach allows you to:
+- Test your actual production rules safely
+- Verify rule conditions are met as expected  
+- See what firmware updates would be requested
+- Validate the complete firmware update logic
+- Get "Dry-Run: " prefixed messages showing intended actions
 
-```python
-manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareVersion, rules=DevicesInUpdateFleet)
-```
+The dry-run mode executes the complete rules engine and firmware validation without making actual update requests to Notehub, making it ideal for testing and development.
 
-The DEFAULT_RULES will accept any configuration of Fleet, Notecard firmware, and Host MCU firmware.  They will _not_ request any firmware updates of the device to a target version. They will also be identified as `"default"`.
+### Code Organization
 
-This makes it possible to test the functions and the Notehub route without worrying about accidentally affecting devices in your Notehub project until you are sure all the different components are working.
+The firmware management system is organized into several key modules:
 
-When executed successfully from a Notehub route, the route should receive a message that the default rule was followed, and that no firmware update requests were made.
+- **`rules_engine.py`**: Core rules evaluation engine with dot notation support
+- **`rules.py`**: Example rule definitions and helper functions  
+- **`main.py`**: Lambda handler with JSON parsing and authentication
+- **`manage_firmware.py`**: Main firmware management orchestration
+- **`auth.py`**: Request authentication handling
 
-### Rules Condition Testing
+When developing rules, you have two options:
+
+1. **Edit `rules.py`**: Modify the existing `DevicesInUpdateFleet` rules or add new rule sets
+2. **Create new rule files**: Import your custom rules into `main.py`
+
+The `rules_engine.py` module provides the core `getFirmwareUpdateTargets()` function that processes any rule set, while `rules.py` contains example implementations.
+
+### Rules Development and Testing
 
 When developing a set of rules, edit the `rules.py` file.
 
 A rule set is a list of dictionaries, each item in the list defines a set of conditions and target firmware versions.
 
-Each rule has an `id`, a set of `conditions` and `targetVersions`.  _IF_ all of the `conditions` are met for a specific rule, then updates to the firmware versions in the `targetVersions` are requested.
+Each rule has an `id`, a set of `conditions` and `target_versions`. _IF_ all of the `conditions` are met for a specific rule, then updates to the firmware versions in the `target_versions` are requested.
 
-**For testing** rule conditions it is recommended to set the `targetVersions` value to `None`.
-
-When a rule is executed by `manage_firmware`, it will return the rule identifier where the conditions were met.
-
-This enables you to test if rule `conditions` are being met as expected without invoking a firmware update request to the device.
+**For testing** rule conditions, use the dry-run functionality rather than setting `target_versions` to `None`.
 
 ```python
 My_Rule_Set = [
     {
-        "id":"highest-precedent-rule",
+        "id":"desired-state-rule",
         "conditions":{
-            "notecard": "8.1.3.1754",
-            "host": "3.1.2",
-            "fleet": "fleet:abc-def-ghi-jklmno"
+            # Use parsed version fields for reliable version checking
+            "firmware_notecard.ver_major": 8,
+            "firmware_notecard.ver_minor": 1,
+            "firmware_notecard.ver_patch": 3,
+            "firmware_notecard.ver_build": 1754,
+            "firmware_host.ver_major": 3,
+            "firmware_host.ver_minor": 1,
+            "firmware_host.ver_patch": 2,
+            "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions": None  # Do not request firmware update
+        "target_versions": None  # Device already at desired versions
     },
     {
-        "id":"next-highest-precedent-rule",
+        "id":"update-from-old-version",
         "conditions":{
-            "notecard": "7.5.4.345",
-            "host": "3.1.1",
-            "fleet": "fleet:abc-def-ghi-jklmno"
+            "firmware_notecard.ver_major": 7,
+            "firmware_notecard.ver_minor": 5,
+            "firmware_notecard.ver_patch": 4,
+            "firmware_host.ver_major": 3,
+            "firmware_host.ver_minor": 1,
+            "firmware_host.ver_patch": 1,
+            "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":None
+        "target_versions":{
+            "notecard":"8.1.3.1754",
+            "host":"3.1.2"
+        }
     },
     {
-        "id":"lowest-precedent-rule",
+        "id":"update-legacy-firmware",
         "conditions":{
-            "notecard": "6.2.3.123",
-            "host": "2.1",
-            "fleet": "fleet:abc-def-ghi-jklmno"
+            # Use lambda for range checks
+            "firmware_notecard.ver_major": lambda major: major < 7,  # Any major version < 7
+            "firmware_host.ver_major": lambda major: major <= 2,     # Host major version <= 2
+            "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":None
+        "target_versions":{
+            "notecard":"8.1.3.1754",
+            "host":"3.1.2"
+        }
     }
 ]
 ```
@@ -159,39 +476,45 @@ Once you have created your rule set, be sure to import it into `main.py` and inc
 
 ```python
 from rules import My_Rule_Set
+# Note: Import the rules engine from rules_engine module
+from rules_engine import getFirmwareUpdateTargets, DEFAULT_RULES
 ```
 
-Configure the call to `manage_firmware` to use the My_Rule_Set set.
+Test your rules safely using dry-run mode:
 
-```python
-manageFirmware(project, deviceUID, fleet, notecardFirmwareVersion, hostFirmwareVersion, rules=My_Rule_Set)
+```bash
+# Test rule conditions and see what updates would be made
+curl -X POST https://your-endpoint.com/firmware-check \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def-ghi-jklmno"], "is_dry_run": true}'
 ```
 
 ### Apply Target Firmware to Rules
 
-Once you have verified the rule conditions are executing as expected, you can then configure the `targetVersions` to the appropriate values for each rule.
+Once you have verified the rule conditions are executing as expected, you can then configure the `target_versions` to the appropriate values for each rule.
 
-Notice in this example the highest precedent rule does not have a set of `targetVersions`. This the desired firmware configuration for this fleet. It acts as a guard against the rest of the rules executing. And will not invoke a firmware update request if the device is already using the desired firmware configuration.
+Notice in this example the highest precedent rule does not have a set of `target_versions`. This the desired firmware configuration for this fleet. It acts as a guard against the rest of the rules executing. And will not invoke a firmware update request if the device is already using the desired firmware configuration.
 
 ```python
 My_Rule_Set = [
     {
         "id":"highest-precedent-rule",
         "conditions":{
-            "notecard": "8.1.3.1754",
-            "host": "3.1.2",
-            "fleet": "fleet:abc-def-ghi-jklmno"
+            "firmware_notecard": "8.1.3.1754",
+            "firmware_host": "3.1.2",
+            "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions": None  # Do not request firmware update
+        "target_versions": None  # Do not request firmware update
     },
     {
         "id":"next-highest-precedent-rule",
         "conditions":{
-            "notecard": "7.5.4.345",
-            "host": "3.1.1",
-            "fleet": "fleet:abc-def-ghi-jklmno"
+            "firmware_notecard": "7.5.4.345",
+            "firmware_host": "3.1.1",
+            "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":{
+        "target_versions":{
             "notecard":"8.1.3.1754",
             "host":"3.1.2"
         }
@@ -199,11 +522,11 @@ My_Rule_Set = [
     {
         "id":"lowest-precedent-rule",
         "conditions":{
-            "notecard": "6.2.3.123",
-            "host": "2.1",
-            "fleet": "fleet:abc-def-ghi-jklmno"
+            "firmware_notecard": "6.2.3.123",
+            "firmware_host": "2.1",
+            "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
-        "targetVersions":{
+        "target_versions":{
             "notecard":"7.5.4.345",
             "host":"3.1.1"
         }
@@ -252,17 +575,73 @@ When the Firmware Check procedure is complete, it returns some information back 
 
 ## Rules and Matching
 
-A rule set is a list of rules.
+The rules engine evaluates device data against a set of rules to determine firmware update actions. Rules support **arbitrary field names**, making the system infinitely extensible.
 
-Each rule is a python dictionary.
-The dictionary fields are listed here with their default values if they are not provided.
+### Rule Structure
+
+Each rule is a Python dictionary with the following structure:
 
 ```python
 {
-    "id": "rule-n", # where n is the index of this rule in the list of rules
-    "conditions":None,
-    "targetVersions":None
+    "id": "rule-n",           # Unique identifier (auto-generated if not provided)
+    "conditions": {},         # Dictionary of field conditions
+    "target_versions": {}      # Target firmware versions to apply
 }
+```
+
+### Advanced Rule Examples
+
+```python
+# Example with arbitrary device characteristics
+Environmental_Sensor_Rules = [
+    {
+        "id": "desired-state-outdoor-sensors",
+        "conditions": {
+            # Use parsed version fields for reliable version checking
+            "firmware_notecard.ver_major": 8,
+            "firmware_notecard.ver_minor": 1,
+            "firmware_notecard.ver_patch": 3,
+            "firmware_host.ver_major": 3,
+            "firmware_host.ver_minor": 1,
+            "firmware_host.ver_patch": 2,
+            "deviceType": "environmental-sensor",
+            "location": "outdoor",
+            "fleets": lambda fleet_list: "fleet:production" in fleet_list,
+            "batteryLevel": lambda level: level > 20  # Battery above 20%
+        },
+        "target_versions": None  # Already at desired state
+    },
+    {
+        "id": "update-outdoor-sensors",
+        "conditions": {
+            "deviceType": "environmental-sensor",
+            "location": "outdoor",
+            "fleets": lambda fleet_list: "fleet:production" in fleet_list,
+            # Use version fields for reliable version range checking
+            "firmware_notecard.ver_major": 8,
+            "firmware_notecard.ver_minor": 1,
+            "firmware_notecard.ver_patch": 2,  # Exactly version 8.1.2.x
+            "batteryLevel": lambda level: level > 50  # Only update if battery sufficient
+        },
+        "target_versions": {
+            "notecard": "8.1.3",
+            "host": "3.1.2"
+        }
+    },
+    {
+        "id": "harsh-environment-special-firmware",
+        "conditions": {
+            "environment": "harsh",
+            "signalStrength": lambda strength: strength > -75,  # Good signal
+            "fleets": lambda fleet_list: any(fleet in fleet_list for fleet in ["fleet:industrial", "fleet:outdoor"]),
+            # Only apply to specific version ranges
+            "firmware_notecard.ver_major": lambda major: major < 8  # Upgrade older versions
+        },
+        "target_versions": {
+            "notecard": "8.1.4-harsh"  # Special firmware for harsh environments
+        }
+    }
+]
 ```
 
 ### ID
@@ -275,61 +654,115 @@ The `id` is used to indicate which rule has been satisfied by the set of conditi
 
 ### Conditions
 
-Conditions define what must be true for this rule to be satisfied.
+Conditions define what device characteristics must be true for a rule to be satisfied. The rules engine supports **any field name**, making it infinitely extensible.
 
 If there are no conditions (i.e. the value of `conditions` is `None`), then the rule is always satisfied.
 
-The conditions consist of 3 checks that must all be satisfied in order for the conditions of the rule to be satisfied.
+#### Condition Types
 
-```python
-{"notecard": None,
- "host": None,
- "fleet": None
-}
-```
+Each condition field can have different value types:
 
-If any of the above fields are `None` or the field is missing, then that part of the condition is always `True`.
+- **String**: Exact match required
+- **Function/Lambda**: Custom logic that returns boolean
+- **None**: Always matches (condition ignored)
 
-The value of the fields can be:
+#### Field Names
 
-- a string that must match exactly
-- a function that accepts a string
-
-#### Match Condition with String
-
-If the value of a conditions is a string, then in order to satisfy the condition, the value provided for the field must match exactly.  For example, if the value for `"notecard"` is `"8.1.3"` then the condition will only be satisfied if the Notecard firmware version provided for the specific device under test is exactly `"8.1.3"` and will not be satisfied for something like `"8.1.3.17074"`.
-
-#### Match Condition with Function
-
-If the value of a condition is a function, it must be a function that accepts a string as an input.  The value of that string is the appropriate value for the field.  For example, if the conditions were defined as
-
-```python
-{"notecard": lambda v: v.startswith("8.1.3"),
- "host": None,
- "fleet": None
-}
-```
-
-then if the firmware version for the specific device started with `"8.1.3"` the condition would be satisfied.
-
-It does not have to be a lambda function. It can be other functions defined in the `rules.py` file. Or even functions imported to check semantic versions.
-
-### Target Versions
-
-These represent which versions of firmware to which the device should be updated.
-
-If the value is `None`, no updates are requested.
-
-If the value is a dictionary, then it must take the form as follows. Each element is listed with it's default value if the field is omitted.
+You can use any field names in conditions:
 
 ```python
 {
-    "notecard":None,
-    "host":None
+    "firmware_notecard": "8.1.3",           # Exact version match
+    "firmware_host": lambda v: v.startswith("3.1"),  # Version prefix match
+    "deviceType": "sensor",                  # Device category
+    "location": "outdoor",                   # Physical location
+    "environment": lambda e: e in ["harsh", "moderate"],  # Environment check
+    "fleets": lambda fleet_list: "fleet:production" in fleet_list,  # Fleet membership
+    "batteryLevel": lambda b: b > 50,        # Battery threshold
+    "signalStrength": lambda s: s > -70,     # Signal quality
+    "customField": "custom-value"            # Any custom field
 }
 ```
 
-If the value of a specific field is set to `None` or the field is omitted, then no request will be made to update the device firmware for that field.
+#### Fleet Membership Example
+
+When device data contains a list of fleets, use a lambda to check membership:
+
+```python
+# Device data
+device_data = {
+    "fleets": ["fleet:production", "fleet:sensors", "fleet:outdoor"]
+}
+
+# Rule condition - check if device belongs to specific fleet
+"conditions": {
+    "fleets": lambda fleet_list: "fleet:production" in fleet_list
+}
+```
+
+#### Match Condition with String
+
+If the value of a condition is a string, then an exact match is required. For example, if the value for `"firmware_notecard.version"` is `"8.1.3"`, then the condition will only be satisfied if the device's Notecard firmware version is exactly `"8.1.3"` and will not match `"8.1.3.17074"`.
+
+#### Match Condition with Function
+
+If the value of a condition is a function, it must accept the device field value as input and return a boolean. For example:
+
+```python
+{
+    "firmware_notecard.version": lambda v: v and v.startswith("8.1.3"),
+    "batteryLevel": lambda level: level > 50,
+    "fleets": lambda fleet_list: "fleet:production" in fleet_list,
+    "environment": lambda env: env in ["production", "staging"]
+}
+```
+
+Functions can be:
+- **Lambda functions**: Inline condition logic
+- **Named functions**: Defined in `rules.py` or imported modules  
+- **Semantic version checks**: Using imported version comparison libraries
+
+#### Complex Condition Examples
+
+```python
+# Multi-fleet membership check
+"fleets": lambda fleet_list: any(fleet in fleet_list for fleet in ["fleet:prod", "fleet:staging"])
+
+# Version range check
+"firmware_notecard.version": lambda v: v and "8.1.2" <= v < "8.2.0"
+
+# Combined environment and signal strength
+"location": lambda loc: loc == "outdoor",
+"signalStrength": lambda strength: strength > -70
+```
+
+### Target Versions
+
+Target versions define which firmware updates should be applied when rule conditions are met.
+
+#### Target Version Formats
+
+**No Updates**: Set to `None`
+```python
+"target_versions": None  # No firmware updates requested
+```
+
+**Specific Firmware Types**: Use a dictionary with firmware type keys
+```python
+"target_versions": {
+    "notecard": "8.1.3",     # Update Notecard to specific version
+    "host": "3.1.2"          # Update Host MCU to specific version
+}
+```
+
+**Single Firmware Type**: Update only one type
+```python
+"target_versions": {
+    "notecard": "8.1.4-emergency"  # Emergency Notecard update only
+}
+```
+
+If a firmware type is omitted or set to `None`, no update request is made for that firmware type.
 
 ### Precedence
 
@@ -358,26 +791,31 @@ Update_Host_Before_Notecard = [
     {
         "id":"has-correct-versions",
         "conditions":{
-            "notecard":lambda v: majorVersion(v) >= 8,
-            "host": lambda v: majorVersion(v) >= 2},
-        "targetVersions":None # we don't want any updates.  device is already on an appropriate set of versions.
+            "firmware_notecard": lambda v: majorVersion(v) >= 8,
+            "firmware_host": lambda v: majorVersion(v) >= 2,
+            "fleets": lambda fleet_list: "fleet:production" in fleet_list
+        },
+        "target_versions": None  # Device already on appropriate versions
     },
     {
-        "id":"update-host",
+        "id":"update-host-first",
         "conditions":{
-            "host": lambda v: majorVersion(v) < 2},
-        "targetVersions":{
-            "host":"2.1.1" # only update the host
+            "firmware_host": lambda v: majorVersion(v) < 2,
+            "fleets": lambda fleet_list: "fleet:production" in fleet_list
+        },
+        "target_versions":{
+            "host": "2.1.1"  # Update host first
         }
     },
     {
-        "id":"update-notecard",
-        "conditions":None # we're in the last condition at this point. We should only be here if the host firmware is already on version 2+ and the Notecard firmware is < 8
-        "targetVersions":{
-            "notecard":"8.1.3.17054"
+        "id":"update-notecard-after-host",
+        "conditions": {
+            "fleets": lambda fleet_list: "fleet:production" in fleet_list
+        },
+        "target_versions":{
+            "notecard": "8.1.3.17054"  # Now update Notecard
         }
     }
-
 ]
 ```
 
@@ -404,6 +842,79 @@ If a device already has a firmware update pending for either the Notecard or the
 There is some risk to this approach, as a change to the update rules will not propagate to devices that have pending updates until the pending update has completed or the pending update is cancelled.
 
 It's worth considering updating this procedure to check to see if the pending update matches the results of the rules prior to making any firmware update requests to Notehub.
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### Version Parsing Errors
+
+**Problem**: `invalid literal for int() with base 10: 'notecard-6'`
+**Cause**: Attempting to parse version strings with prefixes using deprecated string parsing functions
+**Solution**: Use the integer version fields (`ver_major`, `ver_minor`, `ver_patch`, `ver_build`) instead of parsing version strings
+
+```python
+# ❌ Don't do this (may cause parsing errors)
+"firmware_notecard.version": lambda v: int(v.split('.')[0]) >= 8
+
+# ✅ Do this instead (reliable)
+"firmware_notecard.ver_major": lambda major: major >= 8
+```
+
+#### Import Path Issues
+
+**Problem**: `ModuleNotFoundError: No module named 'rules'`
+**Cause**: Incorrect import paths in examples or code
+**Solution**: Use the correct module imports:
+
+```python
+# Core rules engine
+from rules_engine import getFirmwareUpdateTargets, DEFAULT_RULES
+
+# Example rules (edit this file for your rules)
+from rules import DevicesInUpdateFleet, majorVersion, minorVersion
+```
+
+#### Rule Evaluation Debugging
+
+**Problem**: Rules not matching expected devices
+**Solution**: Use dry-run mode to debug rule evaluation:
+
+```bash
+# Test with dry-run to see rule evaluation without actual updates
+curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device": "dev:123456", 
+    "fleets": ["fleet:abc-def"],
+    "firmware_notecard": {"ver_major": 8, "ver_minor": 1, "ver_patch": 3},
+    "firmware_host": {"ver_major": 3, "ver_minor": 1, "ver_patch": 2}
+  }'
+```
+
+#### Firmware Cache Issues
+
+**Problem**: `Firmware version X.X.X not available in local firmware cache`
+**Cause**: Requested firmware version not uploaded to Notehub project
+**Solution**: 
+1. Check available firmware versions in your Notehub project
+2. Upload missing firmware or update rules to use available versions
+3. The error message will list available versions to help you choose
+
+#### JSON Parsing Issues
+
+**Problem**: Firmware fields not being parsed correctly
+**Cause**: Invalid JSON strings in firmware fields
+**Solution**: Ensure firmware JSON strings are properly formatted:
+
+```python
+# ✅ Valid JSON string
+"firmware_notecard": '{"version":"notecard-8.1.3","ver_major":8,"ver_minor":1,"ver_patch":3}'
+
+# ❌ Invalid JSON (missing quotes)
+"firmware_notecard": '{version:notecard-8.1.3,ver_major:8}'
+```
 
 ## System Details
 

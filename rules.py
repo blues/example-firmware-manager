@@ -1,6 +1,6 @@
 DEFAULT_RULES = [{"id":"default",
                   "conditions":None,
-                  "targetVersions": None}]
+                  "target_versions": None}]
 
 def majorVersion(s):
     return int(s.split(".")[0])
@@ -8,18 +8,24 @@ def majorVersion(s):
 def minorVersion(s):
     return int(s.split(".")[1])
 
+def fleetsContain(f):
+    return lambda fleet_list: fleet_list and f in fleet_list
+
 DevicesInUpdateFleet = [
     {
         "conditions":{
-            "notecard":lambda v: v.startswith("7.5.1.")
+            "firmware_notecard.ver_major": 7,
+            "firmware_notecard.ver_minor": 5,
+            "firmware_notecard.ver_patch": 1
             },
-        "targetVersions":{"notecard":"7.5.2.17004"}
+        "target_versions":{"notecard":"7.5.2.17004"}
     },
     {
         "conditions":{
-            "notecard": lambda v: majorVersion(v) < 8, 
-            "fleet":"fleet:50b4f0ee-b8e4-4c9c-b321-243ff1f9e487"},
-        "targetVersions":{"notecard":"8.1.3.17044"}
+            "firmware_notecard.ver_major": lambda major: major is not None and major < 8, 
+            "fleets": fleetsContain("fleet:50b4f0ee-b8e4-4c9c-b321-243ff1f9e487")
+        },
+        "target_versions":{"notecard":"8.1.3.17044"}
     }
 ]
 

@@ -1,11 +1,7 @@
 import os
 import time
 from notehub import NotehubProject, FirmwareType
-
-
-DEFAULT_RULES = [{"id":"default",
-                  "conditions":None,
-                  "targetVersions": None}]
+from rules_engine import getFirmwareUpdateTargets, DEFAULT_RULES
 
 def connectToNotehubProject():
     PROJECT_UID = os.getenv("NOTEHUB_PROJECT_UID")
@@ -41,14 +37,19 @@ class FirmwareCache:
             
 
     def retrieve(self, project, firmwareType, version):
-        if self._cacheIsExpired:
+        if self._cacheIsExpired():
             self.update(project)
 
         if firmwareType not in self.cache:
-            raise(Exception(f"Firmware for {firmwareType} not available in local firmware cache"))
+            raise(Exception(f"Firmware for {firmwareType} not available in local firmware cache. Check your Notehub project's firmware library."))
         
         if version not in self.cache[firmwareType]:
-            raise(Exception(f"Firmware version {version} for {firmwareType} not available in local firmware cache"))
+            available_versions = list(self.cache[firmwareType].keys())
+            if available_versions:
+                versions_list = ", ".join(sorted(available_versions))
+                raise(Exception(f"Firmware version {version} for {firmwareType} not available in local firmware cache. Available versions: {versions_list}. Please update your rules to use an available version or upload the missing firmware to your Notehub project."))
+            else:
+                raise(Exception(f"Firmware version {version} for {firmwareType} not available in local firmware cache. No firmware versions found for {firmwareType}. Please upload firmware to your Notehub project."))
         
         f = self.cache[firmwareType][version]
         if not isinstance(f, str) or f == "":
@@ -61,135 +62,115 @@ class FirmwareCache:
 
 firmwareCache = FirmwareCache()
 
-def getFirmwareUpdateTargets(fleetUID, notecardVersion, hostVersion, rules = DEFAULT_RULES):
-    # !!!!IMPORTANT!!!
-    # If both Notecard and Host firmware updates are requested, Notecard firmware updates
-    # will _always_ preempt Host firmware updates.  Even if the host firmware update is already in progress
-    #
-    # If the order of firmware updates matters. That is, the host firmware update needs to
-    # occur before the Notecard firmware update, then a more complex rule scheme will be required.
-
-    # "notecard" a string or a function that accepts a Notecard version string.  If None or the field is excluded, it won't check the Notecard firmware version
-    # "host" a string or a function that accepts a host version string. If None or the field is excluded, it won't check the host firmware version
-    # "targetVersions" a dictionary with "notecard" and "host" fields where the value is the respective firmware version. If the value is None or the field is excluded, then no action will be taken
-    #                  if the targetVersions is excluded or None, then no update requests will be made
-    # "conditions" a dictionary of "notecard", "host", "fleet" fields that describe the conditions under which to perform a firmware update.  If field is excluded or set to None, then it's assumed no conditions guard the update to the target versions (used as a fallback if no previous rules have been met)
-    
-
-    # IF _all_ conditions are met, then perform update to target versions. Rules are executed top to bottom of the array.  Lower indexes in the array take precedence
-    # rules = [{"conditions":{"notecard": "at-my-desired-firmware",
-    #                         "host": "at host desired firmware",
-    #                         "fleet": 'my-fleet-uid'},
-    #           "targetVersions":None #don't update if we have the desired conditions
-    #         },
-    #         {"conditions":{"notecard":'abc',   # if these conditions are met
-    #                          "host":'def',
-    #                          "fleet": 'my-fleet-uid'
-    #                         },
-    #            "targetVersions": defaultTargetVersions  #update to these versions
-    #         },
-    #         {"conditions":{"notecard": lambda v: v.startsWith("8."), 
-    #                        "host": 'uio',
-    #                        "fleet": 'my-fleet-uid'
-    #                        },
-    #          "targetVersions":defaultTargetVersions
-    #         }
-    #         ]
-
-
-    def match_condition(value, condition):
-        if condition is None:
-            # if there's no condition, then it should always return the condition was matched
-            return True
-        
-        if callable(condition):
-            return condition(value)
-        
-        return value == condition
-    
-    if not isinstance(rules, list):
-        rules = [rules]
-
-    for i, r in enumerate(rules):
-        c = r.get("conditions", None)
-        id = r.get("id", f"rule-{i + 1}")
-        targetVersions  = r.get("targetVersions", None)
-        if c is None:
-            return (id, targetVersions)
-        
-        notecardUpdateStatus = match_condition(notecardVersion, c.get("notecard"))
-        hostUpdateStatus     = match_condition(hostVersion, c.get("host"))
-        fleetMatches         = match_condition(fleetUID, c.get("fleet"))
-        if notecardUpdateStatus and hostUpdateStatus and fleetMatches:
-            return (id, targetVersions)
-
-    return (None, None)
 
 
 
-def fetchDeviceFirmwareVersion(project, deviceUID, firmwareType):
+def fetchDeviceFirmwareInfo(project, deviceUID, firmwareType):
     d = project.getDeviceFirmwareUpdateHistory(deviceUID, firmwareType)
-    return d.get("current",{}).get("version")
+    return d.get("current",{})
     
 
-def requestUpdateToTargetVersion(project, deviceUID, currentVersion, targetVersions, firmwareType):
-    #global firmwareCache
-
-    fw = targetVersions.get(firmwareType)
+def checkUpdateToTargetVersion(project, deviceUID, currentVersion, target_versions, firmwareType):
+    """
+    Check if a firmware update should be performed and validate the request.
+    
+    Returns:
+        tuple: (should_update: bool, message: str, target_version: str, filename: str)
+    """
+    fw = target_versions.get(firmwareType)
     
     if (fw is None):
-        return f"No firmware update request for {firmwareType}"
+        return False, f"No firmware update request for {firmwareType}", None, None
 
     if (fw == currentVersion):
-        return F"Skipping update request for {firmwareType}. Already at target version of {fw}."
+        return False, f"Skipping update request for {firmwareType}. Already at target version of {fw}.", fw, None
     
-    file = firmwareCache.retrieve(project, firmwareType, fw)
+    try:
+        file = firmwareCache.retrieve(project, firmwareType, fw)
+        if file is None:
+            raise(Exception(f"Unable to locate {firmwareType} firmware image for requested version {fw}. Please check available firmware in your Notehub project."))
+        return True, f"Would request {firmwareType} firmware update from {currentVersion} to {fw}.", fw, file
+    except Exception as e:
+        return False, f"Cannot update {firmwareType}: {str(e)}", fw, None
 
-    if file is None:
-        raise(Exception(f"Unable to locate {firmwareType} firmware image for requested version {fw}"))
+
+def executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, currentVersion, targetVersion):
+    """
+    Execute the actual firmware update request to Notehub.
+    """
+    project.requestDeviceFirmwareUpdate(deviceUID, filename, firmwareType)
+    return f"Requested {firmwareType} firmware update from {currentVersion} to {targetVersion}."
+
+
+
+def manageFirmware(project, deviceUID, device_data, rules={}, is_dry_run=False):
+
+    if device_data.get("firmware_notecard") is None:
+        device_data["firmware_notecard"] = fetchDeviceFirmwareInfo(project, deviceUID, FirmwareType.Notecard)
+
+    if device_data.get("firmware_host") is None:
+        device_data["firmware_host"] = fetchDeviceFirmwareInfo(project, deviceUID, FirmwareType.Host)
+
     
-    project.requestDeviceFirmwareUpdate(deviceUID, file, firmwareType)
+    (ruleID, target_versions) = getFirmwareUpdateTargets(device_data, rules)
 
-    return f"Requested {firmwareType} firmware update from {currentVersion} to {fw}."
-
+    dry_run_prefix = "Dry-Run: " if is_dry_run else ""
     
-
-
-
-
-def manageFirmware(project, deviceUID,fleetUID=None,notecardFirmwareVersion=None, hostFirmwareVersion=None, rules={}):
-
-    if notecardFirmwareVersion is None:
-        notecardFirmwareVersion = fetchDeviceFirmwareVersion(project, deviceUID, FirmwareType.Notecard)
-
-    if hostFirmwareVersion is None:
-        hostFirmwareVersion = fetchDeviceFirmwareVersion(project, deviceUID, FirmwareType.Host)
-
-    (ruleID, targetVersions) = getFirmwareUpdateTargets(fleetUID=fleetUID, notecardVersion=notecardFirmwareVersion, hostVersion=hostFirmwareVersion, rules=rules)
-
     if ruleID is None:
-        return "No rule conditions met. No updates required"
+        return f"{dry_run_prefix}No rule conditions met. No updates required"
     
     ruleMessage = f"According to rule id {ruleID},"
-    updateNotRequired = targetVersions is None
+    updateNotRequired = target_versions is None
     if updateNotRequired:
-        return f"{ruleMessage} firmware requirements met, no updates required"
+        return f"{dry_run_prefix}{ruleMessage} firmware requirements met, no updates required"
     
     
     updateStatus = project.getDeviceFirmwareUpdateStatus(deviceUID, FirmwareType.Notecard)
 
     if updateStatus.get("dfu_in_progress", False):
-        return f"{ruleMessage} firmware requirements NOT met.  Update not requested because Notecard update is in progress"
+        return f"{dry_run_prefix}{ruleMessage} firmware requirements NOT met.  Update not requested because Notecard update is in progress"
     
     updateStatus = project.getDeviceFirmwareUpdateStatus(deviceUID, FirmwareType.Host)
 
     if updateStatus.get("dfu_in_progress", False):
-        return f"{ruleMessage} firmware requirements NOT met.  Update not requested because Host update is in progress"
+        return f"{dry_run_prefix}{ruleMessage} firmware requirements NOT met.  Update not requested because Host update is in progress"
     
 
-    ncMessage   = requestUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, targetVersions, FirmwareType.Notecard)
-    hostMessage = requestUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, targetVersions, FirmwareType.Host)
+    # Extract current versions from device_data for update requests
+    notecardFirmwareVersion = device_data.get("firmware_notecard", {}).get("version")
+    hostFirmwareVersion = device_data.get("firmware_host", {}).get("version")
+    
+    nc_should_update, nc_message, nc_target_version, nc_filename = checkUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
+    host_should_update, host_message, host_target_version, host_filename = checkUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
 
-    m = " ".join([ruleMessage, ncMessage, hostMessage])
+    if not is_dry_run:
+        if nc_should_update:
+            nc_message = executeUpdateToTargetVersion(project, deviceUID, nc_filename, FirmwareType.Notecard, notecardFirmwareVersion, nc_target_version)
+        if host_should_update:
+            host_message = executeUpdateToTargetVersion(project, deviceUID, host_filename, FirmwareType.Host, hostFirmwareVersion, host_target_version)
+
+    m = " ".join([f"{dry_run_prefix}{ruleMessage}", nc_message, host_message])
     
     return m
+
+#MIT License
+
+#Copyright (c) 2025 Blues Inc.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
