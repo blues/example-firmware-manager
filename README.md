@@ -306,6 +306,36 @@ The system automatically parses JSON string firmware data and extracts individua
 }
 ```
 
+#### JSON String Parsing
+
+The system includes automatic JSON parsing for firmware fields that may arrive as JSON strings from external systems. This is handled in `main.py` through the `parse_firmware_fields()` function:
+
+```python
+# Input payload with JSON strings
+payload = {
+    "device": "dev:123456",
+    "firmware_notecard": '{"version":"notecard-8.1.3","ver_major":8,"ver_minor":1,"ver_patch":3}',
+    "firmware_host": '{"version":"host-3.1.2","ver_major":3,"ver_minor":1,"ver_patch":2}'
+}
+
+# Automatically parsed to structured data for rules engine
+parsed_payload = {
+    "device": "dev:123456",
+    "firmware_notecard": {
+        "version": "notecard-8.1.3",
+        "ver_major": 8,
+        "ver_minor": 1,
+        "ver_patch": 3
+    },
+    "firmware_host": {
+        "version": "host-3.1.2",
+        "ver_major": 3,
+        "ver_minor": 1,
+        "ver_patch": 2
+    }
+}
+```
+
 **Recommended Approach**: Use the parsed integer fields (`ver_major`, `ver_minor`, `ver_patch`, `ver_build`) in your rules instead of parsing version strings. This approach:
 
 - ✅ **Handles prefixes**: Works with `"notecard-6.2.5"`, `"host-3.1.2"`, etc.
@@ -365,6 +395,23 @@ This approach allows you to:
 - Get "Dry-Run: " prefixed messages showing intended actions
 
 The dry-run mode executes the complete rules engine and firmware validation without making actual update requests to Notehub, making it ideal for testing and development.
+
+### Code Organization
+
+The firmware management system is organized into several key modules:
+
+- **`rules_engine.py`**: Core rules evaluation engine with dot notation support
+- **`rules.py`**: Example rule definitions and helper functions  
+- **`main.py`**: Lambda handler with JSON parsing and authentication
+- **`manage_firmware.py`**: Main firmware management orchestration
+- **`auth.py`**: Request authentication handling
+
+When developing rules, you have two options:
+
+1. **Edit `rules.py`**: Modify the existing `DevicesInUpdateFleet` rules or add new rule sets
+2. **Create new rule files**: Import your custom rules into `main.py`
+
+The `rules_engine.py` module provides the core `getFirmwareUpdateTargets()` function that processes any rule set, while `rules.py` contains example implementations.
 
 ### Rules Development and Testing
 
@@ -429,6 +476,8 @@ Once you have created your rule set, be sure to import it into `main.py` and inc
 
 ```python
 from rules import My_Rule_Set
+# Note: Import the rules engine from rules_engine module
+from rules_engine import getFirmwareUpdateTargets, DEFAULT_RULES
 ```
 
 Test your rules safely using dry-run mode:
@@ -793,6 +842,79 @@ If a device already has a firmware update pending for either the Notecard or the
 There is some risk to this approach, as a change to the update rules will not propagate to devices that have pending updates until the pending update has completed or the pending update is cancelled.
 
 It's worth considering updating this procedure to check to see if the pending update matches the results of the rules prior to making any firmware update requests to Notehub.
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### Version Parsing Errors
+
+**Problem**: `invalid literal for int() with base 10: 'notecard-6'`
+**Cause**: Attempting to parse version strings with prefixes using deprecated string parsing functions
+**Solution**: Use the integer version fields (`ver_major`, `ver_minor`, `ver_patch`, `ver_build`) instead of parsing version strings
+
+```python
+# ❌ Don't do this (may cause parsing errors)
+"firmware_notecard.version": lambda v: int(v.split('.')[0]) >= 8
+
+# ✅ Do this instead (reliable)
+"firmware_notecard.ver_major": lambda major: major >= 8
+```
+
+#### Import Path Issues
+
+**Problem**: `ModuleNotFoundError: No module named 'rules'`
+**Cause**: Incorrect import paths in examples or code
+**Solution**: Use the correct module imports:
+
+```python
+# Core rules engine
+from rules_engine import getFirmwareUpdateTargets, DEFAULT_RULES
+
+# Example rules (edit this file for your rules)
+from rules import DevicesInUpdateFleet, majorVersion, minorVersion
+```
+
+#### Rule Evaluation Debugging
+
+**Problem**: Rules not matching expected devices
+**Solution**: Use dry-run mode to debug rule evaluation:
+
+```bash
+# Test with dry-run to see rule evaluation without actual updates
+curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device": "dev:123456", 
+    "fleets": ["fleet:abc-def"],
+    "firmware_notecard": {"ver_major": 8, "ver_minor": 1, "ver_patch": 3},
+    "firmware_host": {"ver_major": 3, "ver_minor": 1, "ver_patch": 2}
+  }'
+```
+
+#### Firmware Cache Issues
+
+**Problem**: `Firmware version X.X.X not available in local firmware cache`
+**Cause**: Requested firmware version not uploaded to Notehub project
+**Solution**: 
+1. Check available firmware versions in your Notehub project
+2. Upload missing firmware or update rules to use available versions
+3. The error message will list available versions to help you choose
+
+#### JSON Parsing Issues
+
+**Problem**: Firmware fields not being parsed correctly
+**Cause**: Invalid JSON strings in firmware fields
+**Solution**: Ensure firmware JSON strings are properly formatted:
+
+```python
+# ✅ Valid JSON string
+"firmware_notecard": '{"version":"notecard-8.1.3","ver_major":8,"ver_minor":1,"ver_patch":3}'
+
+# ❌ Invalid JSON (missing quotes)
+"firmware_notecard": '{version:notecard-8.1.3,ver_major:8}'
+```
 
 ## System Details
 
