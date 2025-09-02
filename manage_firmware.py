@@ -41,10 +41,15 @@ class FirmwareCache:
             self.update(project)
 
         if firmwareType not in self.cache:
-            raise(Exception(f"Firmware for {firmwareType} not available in local firmware cache"))
+            raise(Exception(f"Firmware for {firmwareType} not available in local firmware cache. Check your Notehub project's firmware library."))
         
         if version not in self.cache[firmwareType]:
-            raise(Exception(f"Firmware version {version} for {firmwareType} not available in local firmware cache"))
+            available_versions = list(self.cache[firmwareType].keys())
+            if available_versions:
+                versions_list = ", ".join(sorted(available_versions))
+                raise(Exception(f"Firmware version {version} for {firmwareType} not available in local firmware cache. Available versions: {versions_list}. Please update your rules to use an available version or upload the missing firmware to your Notehub project."))
+            else:
+                raise(Exception(f"Firmware version {version} for {firmwareType} not available in local firmware cache. No firmware versions found for {firmwareType}. Please upload firmware to your Notehub project."))
         
         f = self.cache[firmwareType][version]
         if not isinstance(f, str) or f == "":
@@ -83,7 +88,7 @@ def checkUpdateToTargetVersion(project, deviceUID, currentVersion, target_versio
     try:
         file = firmwareCache.retrieve(project, firmwareType, fw)
         if file is None:
-            raise(Exception(f"Unable to locate {firmwareType} firmware image for requested version {fw}"))
+            raise(Exception(f"Unable to locate {firmwareType} firmware image for requested version {fw}. Please check available firmware in your Notehub project."))
         return True, f"Would request {firmwareType} firmware update from {currentVersion} to {fw}.", fw, file
     except Exception as e:
         return False, f"Cannot update {firmwareType}: {str(e)}", fw, None
@@ -135,27 +140,9 @@ def manageFirmware(project, deviceUID, device_data, rules={}, is_dry_run=False):
     notecardFirmwareVersion = device_data.get("firmware_notecard", {}).get("version")
     hostFirmwareVersion = device_data.get("firmware_host", {}).get("version")
     
-    #     should_update, message, target_version, filename = checkUpdateToTargetVersion(
-    #     project, deviceUID, currentVersion, target_versions, firmwareType
-    # )
-    
-    # if not should_update:
-    #     return message
-    
-    # Execute the update
-    # return executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, currentVersion, target_version)
-    
     nc_should_update, nc_message, nc_target_version, nc_filename = checkUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
     host_should_update, host_message, host_target_version, host_filename = checkUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
 
-    # if is_dry_run:
-    #     # In dry-run mode, only check what updates would be performed
-    #     nc_should_update, ncMessage, _, _ = checkUpdateToTargetVersion(
-    #         project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard
-    #     )
-    #     host_should_update, hostMessage, _, _ = checkUpdateToTargetVersion(
-    #         project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host
-    #     )
     if not is_dry_run:
         if nc_should_update:
             nc_message = executeUpdateToTargetVersion(project, deviceUID, nc_filename, FirmwareType.Notecard, notecardFirmwareVersion, nc_target_version)

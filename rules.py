@@ -14,13 +14,15 @@ def fleetsContain(f):
 DevicesInUpdateFleet = [
     {
         "conditions":{
-            "firmware_notecard.version":lambda v: v and v.startswith("7.5.1.")
+            "firmware_notecard.ver_major": 7,
+            "firmware_notecard.ver_minor": 5,
+            "firmware_notecard.ver_patch": 1
             },
         "target_versions":{"notecard":"7.5.2.17004"}
     },
     {
         "conditions":{
-            "firmware_notecard.version": lambda v: v and majorVersion(v) < 8, 
+            "firmware_notecard.ver_major": lambda major: major is not None and major < 8, 
             "fleets": fleetsContain("fleet:50b4f0ee-b8e4-4c9c-b321-243ff1f9e487")
         },
         "target_versions":{"notecard":"8.1.3.17044"}

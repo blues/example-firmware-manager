@@ -17,6 +17,31 @@ from rules_engine import getFirmwareUpdateTargets
 import rules
 
 
+def create_firmware_data_with_version(version_string):
+    """
+    Create firmware data with both version string and parsed version fields.
+    
+    Args:
+        version_string (str): Version string like "7.5.1.12345"
+        
+    Returns:
+        dict: Firmware data with version fields
+    """
+    parts = version_string.split(".")
+    firmware_data = {"version": version_string}
+    
+    if len(parts) >= 1:
+        firmware_data["ver_major"] = int(parts[0])
+    if len(parts) >= 2:
+        firmware_data["ver_minor"] = int(parts[1])
+    if len(parts) >= 3:
+        firmware_data["ver_patch"] = int(parts[2])
+    if len(parts) >= 4:
+        firmware_data["ver_build"] = int(parts[3])
+        
+    return firmware_data
+
+
 class TestDefaultRules(unittest.TestCase):
     """Test cases for DEFAULT_RULES from rules.py."""
     
@@ -25,12 +50,12 @@ class TestDefaultRules(unittest.TestCase):
         # Test with various device data configurations
         test_cases = [
             {},  # Empty device data
-            {"firmware_notecard": {"version": "8.1.3"}},  # Only notecard
-            {"firmware_host": {"version": "3.1.2"}},  # Only host
+            {"firmware_notecard": create_firmware_data_with_version("8.1.3")},  # Only notecard
+            {"firmware_host": create_firmware_data_with_version("3.1.2")},  # Only host
             {"fleets": ["fleet:production"]},  # Only fleet
             {  # Complete device data
-                "firmware_notecard": {"version": "8.1.3"},
-                "firmware_host": {"version": "3.1.2"}, 
+                "firmware_notecard": create_firmware_data_with_version("8.1.3"),
+                "firmware_host": create_firmware_data_with_version("3.1.2"), 
                 "fleets": ["fleet:production"]
             }
         ]
@@ -62,7 +87,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
         for version in test_versions:
             with self.subTest(version=version):
                 device_data = {
-                    "firmware_notecard": {"version": version}
+                    "firmware_notecard": create_firmware_data_with_version(version)
                 }
                 
                 rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules.DevicesInUpdateFleet)
@@ -84,7 +109,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
         for version in test_versions:
             with self.subTest(version=version):
                 device_data = {
-                    "firmware_notecard": {"version": version},
+                    "firmware_notecard": create_firmware_data_with_version(version),
                     "fleets": ["some-other-fleet"]  # Make sure it doesn't match rule 2
                 }
                 
@@ -107,7 +132,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
         for version in test_versions:
             with self.subTest(version=version):
                 device_data = {
-                    "firmware_notecard": {"version": version},
+                    "firmware_notecard": create_firmware_data_with_version(version),
                     "fleets": [self.test_fleet]
                 }
                 
@@ -128,7 +153,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
         for version in test_versions:
             with self.subTest(version=version):
                 device_data = {
-                    "firmware_notecard": {"version": version},
+                    "firmware_notecard": create_firmware_data_with_version(version),
                     "fleets": [self.test_fleet]
                 }
                 
@@ -141,7 +166,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
     def test_rule_2_wrong_fleet_no_match(self):
         """Test Rule 2: Major version < 8 but wrong fleet should not match."""
         device_data = {
-            "firmware_notecard": {"version": "7.5.4.123"},
+            "firmware_notecard": create_firmware_data_with_version("7.5.4.123"),
             "fleets": ["fleet:different-fleet-id"]
         }
         
@@ -154,7 +179,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
     def test_rule_2_no_fleet_no_match(self):
         """Test Rule 2: Major version < 8 but no fleet should not match."""
         device_data = {
-            "firmware_notecard": {"version": "7.5.4.123"}
+            "firmware_notecard": create_firmware_data_with_version("7.5.4.123")
             # Missing fleets field
         }
         
@@ -167,7 +192,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
     def test_rule_precedence_7_5_1_beats_major_version_rule(self):
         """Test that Rule 1 (7.5.1.*) takes precedence over Rule 2 (major < 8) when both match."""
         device_data = {
-            "firmware_notecard": {"version": "7.5.1.12345"},  # Matches both rules
+            "firmware_notecard": {"ver_major": 7,"ver_minor":5, "ver_patch":1,"ver_build":12345},
             "fleets": [self.test_fleet]  # Matches rule 2
         }
         
@@ -181,7 +206,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
     def test_multiple_fleets_rule_2_match(self):
         """Test Rule 2: Device in multiple fleets including the target fleet."""
         device_data = {
-            "firmware_notecard": {"version": "7.9.9.999"},
+            "firmware_notecard": {"ver_major": 7,"ver_minor":9, "ver_patch":9,"ver_build":999},
             "fleets": ["fleet:production", self.test_fleet, "fleet:testing"]
         }
         
@@ -228,7 +253,7 @@ class TestDevicesInUpdateFleetRules(unittest.TestCase):
         
         # Empty fleets list
         device_data = {
-            "firmware_notecard": {"version": "7.5.1.123"},
+            "firmware_notecard": {"ver_major": 7,"ver_minor":5, "ver_patch":1,"ver_build":123},
             "fleets": []
         }
         rule_id, target_versions = getFirmwareUpdateTargets(device_data, rules.DevicesInUpdateFleet)

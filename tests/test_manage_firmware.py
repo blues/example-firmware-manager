@@ -224,6 +224,24 @@ class TestFirmwareCache(unittest.TestCase):
         
         self.assertIn("Invalid firmware file name", str(context.exception))
 
+    def test_firmware_cache_retrieve_empty_versions_list(self):
+        """Test FirmwareCache.retrieve raises exception when firmware type exists but has no versions."""
+        # Set up cache with firmware type present but empty versions dict
+        self.cache.cache = {manage_firmware.FirmwareType.Notecard: {}}  # Empty versions
+        self.cache.cache_expiry = time.time() + 1000  # Don't expire
+        
+        with self.assertRaises(Exception) as context:
+            self.cache.retrieve(self.mock_project, manage_firmware.FirmwareType.Notecard, "8.1.3")
+        
+        # Verify the specific error message for empty versions list
+        error_message = str(context.exception)
+        self.assertIn("Firmware version 8.1.3 for notecard not available in local firmware cache", error_message)
+        self.assertIn("No firmware versions found for notecard", error_message) 
+        self.assertIn("Please upload firmware to your Notehub project", error_message)
+        
+        # Verify it's the "no versions found" message, not the "available versions" message
+        self.assertNotIn("Available versions:", error_message)
+
 
 
 class TestFetchDeviceFirmwareInfo(unittest.TestCase):

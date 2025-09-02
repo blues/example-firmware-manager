@@ -4,6 +4,36 @@ _Python Edition_
 
 Enforce Notecard and Host firmware combinations, and provide rules for when to update Notecard and Host MCU firmware.
 
+## Key Features
+
+- **🛡️ Secure Authentication**: Multiple authentication methods with robust security features
+- **🧪 Dry-Run Testing**: Test firmware update logic safely without making actual requests  
+- **⚡ Flexible Rules Engine**: Support for arbitrary device fields and complex conditions
+- **📊 100% Test Coverage**: Comprehensive unit tests ensure reliability
+- **🔄 Intelligent Caching**: Optimized firmware version caching to reduce API calls
+- **🎯 Dot Notation Support**: Access nested object properties in rule conditions
+
+## Quick Start with Dry-Run Testing
+
+**🚨 IMPORTANT**: Always test your firmware update routes with dry-run mode first!
+
+```bash
+# Test your route safely - no actual firmware updates will be made
+curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+  -H "Authorization: Bearer your-secure-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+```
+
+This will:
+- ✅ Execute your complete rules engine logic
+- ✅ Validate firmware versions and availability  
+- ✅ Show what updates *would* be requested
+- ❌ **Not make any actual firmware update requests**
+- 📝 Return messages prefixed with "Dry-Run: "
+
+Once you've verified the dry-run behavior is correct, you can enable the route for automated firmware updates.
+
 Rules in this example can be based on **any device characteristics**, including:
 
 - Notecard firmware version (`firmware_notecard`)
@@ -31,9 +61,15 @@ All of the following configurations can be applied to any of the appropriate Not
 |Notefiles|Selected Notefiles| |
 |Include Other Notefiles|_session.qo| |
 |Transform Data|JSONata Expression| |
-|JSONata Expression| `($not(body.opened) ? $doNotRoute(): {"device":device, "fleets":fleets})` | Filter to only session opening events, and only provide the necessary data required for the firmware check|
-|**For Testing**| |When testing the route setup and configuration, also apply the following|
-|Enable this route| off (false) | Will show `(Currently disabled)` on Route UI when set to off|
+|JSONata Expression| `((body.closed) ? $doNotRoute(): $)` | Exclude session closing events. Send the entire Note to the firmware check otherwise|
+|**For Authorization**| |When using with AWS Lambda URL or custom RESTful API, add an authorization token to the request headers|
+|HTTP Headers|Additional Headers|Enable inclusion of additional request headers|
+|Header name|x-api-key||
+|Header value|your-custom-token||
+|**For Testing**||When testing the route setup and configuration, also apply the following|
+|HTTP Headers|Additional Headers|Enable inclusion of additional request headers|
+|Header name|x-dry-run||
+|Header value|true||
 
 ---
 > **❗IMPORTANT**
@@ -42,11 +78,24 @@ All of the following configurations can be applied to any of the appropriate Not
 
 ### Testing Routes
 
+**Recommended Testing Approach:**
+
+1. **Start with Dry-Run Mode**: Always test your route with `is_dry_run=true` first
+   ```bash
+   curl -X POST "https://your-endpoint.com/firmware-check?is_dry_run=true" \
+     -H "Authorization: Bearer your-token" \
+     -H "Content-Type: application/json" \
+     -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
+   ```
+
+2. **Manual Event Routing**: Test with existing Notehub events without affecting live devices
+
 It is possible in Notehub to manually route an existing event in Notehub to any route, including a disabled route.
 
 <https://dev.blues.io/notehub/notehub-walkthrough/#manually-routing-events>
 
-By disabling the route, it prevents it from being executed automatically from events generated in Notehub while the route is being tested and developed. But it can still be executed manually using existing event data in Notehub.
+
+**⚠️ Safety Tip**: The dry-run mode provides an additional safety layer - even if you accidentally manually trigger it, no actual firmware updates will occur when `is_dry_run=true`.
 
 ## Authentication and Script Environment Configuration
 
@@ -81,6 +130,7 @@ You will want to create the following environment variables with the values obta
 |NOTEHUB_CLIENT_ID|`<client id obtained above>`|
 |NOTEHUB_CLIENT_SECRET|`<client secret obtained above>`|
 |NOTEHUB_PROJECT_UID|`<app:xxxxx-xxxx-xxxx-xxxx-xxxxx>`|
+|FIRMWARE_CHECK_AUTH_TOKEN|`<endpoint-authorization-token>`|
 
 > **❗IMPORTANT**
 > 
@@ -121,7 +171,7 @@ The system supports multiple authentication schemes for maximum flexibility:
 To enable request authentication, configure your authentication token as an environment variable:
 
 ```bash
-export AUTH_TOKEN="your-secure-token-here"
+export FIRMWARE_CHECK_AUTH_TOKEN="your-secure-token-here"
 ```
 
 ### Example Usage
@@ -142,7 +192,18 @@ curl -X POST https://your-endpoint.com/firmware-check \
   -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
 ```
 
-#### Dry-Run Mode
+### Authentication Errors
+
+The system returns specific error messages for authentication failures:
+
+- `Missing authorization header` - No authentication header provided
+- `Empty authorization token` - Authentication header is empty or contains only whitespace
+- `Invalid authorization token` - Token doesn't match the expected value
+- `Authentication not configured` - Server-side authentication token is not configured
+- `Authentication system error` - Internal error during authentication processing
+
+
+## Dry-Run Mode
 
 To test firmware update logic without making actual update requests, add the `is_dry_run` flag to your request:
 
@@ -178,16 +239,6 @@ When `is_dry_run` is enabled:
 - Response messages are prefixed with "Dry-Run: "
 - Returns "Would request" instead of "Requested" in update messages
 
-### Authentication Errors
-
-The system returns specific error messages for authentication failures:
-
-- `Missing authorization header` - No authentication header provided
-- `Empty authorization token` - Authentication header is empty or contains only whitespace
-- `Invalid authorization token` - Token doesn't match the expected value
-- `Authentication not configured` - Server-side authentication token is not configured
-- `Authentication system error` - Internal error during authentication processing
-
 
 ## Rules Configuration
 
@@ -195,7 +246,7 @@ The rules engine provides a powerful and flexible system for defining firmware u
 
 ### Generic Rules Engine
 
-The rules engine now supports arbitrary field names in conditions, making it infinitely extensible beyond the traditional notecard/host/fleet model. You can create conditions based on:
+The rules engine supports arbitrary field names in conditions, making it extensible beyond the traditional notecard/host/fleet model. You can create conditions based on:
 
 - **Firmware versions**: `firmware_notecard`, `firmware_host`
 - **Device characteristics**: `deviceType`, `location`, `environment`
@@ -209,13 +260,20 @@ Device data is passed as a dictionary to the rules engine. Firmware information 
 ```python
 device_data = {
     "firmware_notecard": {
-        "version": "8.1.3.17074",
+        "version": "notecard-8.1.3.17074",   # Full version string (may have prefix)
+        "ver_major": 8,                      # Parsed major version (recommended for rules)
+        "ver_minor": 1,                      # Parsed minor version (recommended for rules)
+        "ver_patch": 3,                      # Parsed patch version (recommended for rules)
+        "ver_build": 17074,                  # Parsed build number (recommended for rules)
         "built": "2024-01-15T10:30:00Z",
         "type": "release",
         "size": 2048576
     },
     "firmware_host": {
-        "version": "3.1.2", 
+        "version": "host-3.1.2",             # Full version string (may have prefix)
+        "ver_major": 3,                      # Parsed major version (recommended for rules)
+        "ver_minor": 1,                      # Parsed minor version (recommended for rules)
+        "ver_patch": 2,                      # Parsed patch version (recommended for rules)
         "built": "2024-01-10T14:22:00Z",
         "type": "production",
         "size": 1024000,
@@ -230,18 +288,51 @@ device_data = {
 }
 ```
 
+### Version Field Handling
+
+The system automatically parses JSON string firmware data and extracts individual version components for reliable rule matching:
+
+```python
+# Firmware data can arrive as JSON strings (common from external systems)
+"firmware_notecard": '{"version":"notecard-6.2.5","ver_major":6,"ver_minor":2,"ver_patch":5,"ver_build":16868}'
+
+# System automatically parses this to:
+"firmware_notecard": {
+    "version": "notecard-6.2.5",
+    "ver_major": 6,        # Integer - reliable for comparisons
+    "ver_minor": 2,        # Integer - reliable for comparisons  
+    "ver_patch": 5,        # Integer - reliable for comparisons
+    "ver_build": 16868     # Integer - reliable for comparisons
+}
+```
+
+**Recommended Approach**: Use the parsed integer fields (`ver_major`, `ver_minor`, `ver_patch`, `ver_build`) in your rules instead of parsing version strings. This approach:
+
+- ✅ **Handles prefixes**: Works with `"notecard-6.2.5"`, `"host-3.1.2"`, etc.
+- ✅ **Reliable comparisons**: Integer comparisons are more reliable than string parsing
+- ✅ **Error-free**: Avoids parsing errors from version string variations
+- ✅ **Performance**: Integer comparisons are faster than string parsing
+
 ### Dot Notation for Nested Objects
 
 The rules engine supports **dot notation** to access nested object properties. This is particularly useful for firmware objects that contain multiple fields:
 
 ```python
-# Access firmware version from nested objects
+# Access firmware version fields from nested objects
 rules = [
     {
         "id": "firmware-version-check",
         "conditions": {
-            "firmware_notecard.version": lambda v: v and v.startswith("8.1.3"),
-            "firmware_host.version": "3.1.2",                    # Exact version match
+            # Recommended: Use parsed version fields for reliable comparisons
+            "firmware_notecard.ver_major": 8,                    # Exact major version match
+            "firmware_notecard.ver_minor": lambda minor: minor >= 1,  # Minor version >= 1
+            "firmware_host.ver_major": 3,                        # Host major version
+            "firmware_host.ver_minor": lambda minor: minor < 2,  # Host minor version < 2
+            
+            # Alternative: String-based version checking (works but not recommended for new rules)
+            "firmware_notecard.version": lambda v: v and v.endswith("17074"),
+            
+            # Other firmware metadata
             "firmware_notecard.type": "release",                 # Check firmware type
             "firmware_host.built": lambda date: "2024-01" in date  # Check build date
         },
@@ -262,7 +353,8 @@ For initial testing, use the dry-run functionality instead of special testing ru
 curl -X POST https://your-endpoint.com/firmware-check \
   -H "Authorization: Bearer your-secure-token-here" \
   -H "Content-Type: application/json" \
-  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"], "is_dry_run": true}'
+  -H "x-dry-run: true" \
+  -d '{"device": "dev:123456", "fleets": ["fleet:abc-def"]}'
 ```
 
 This approach allows you to:
@@ -289,8 +381,14 @@ My_Rule_Set = [
     {
         "id":"desired-state-rule",
         "conditions":{
-            "firmware_notecard.version": "8.1.3.1754",
-            "firmware_host.version": "3.1.2",
+            # Use parsed version fields for reliable version checking
+            "firmware_notecard.ver_major": 8,
+            "firmware_notecard.ver_minor": 1,
+            "firmware_notecard.ver_patch": 3,
+            "firmware_notecard.ver_build": 1754,
+            "firmware_host.ver_major": 3,
+            "firmware_host.ver_minor": 1,
+            "firmware_host.ver_patch": 2,
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
         "target_versions": None  # Device already at desired versions
@@ -298,8 +396,12 @@ My_Rule_Set = [
     {
         "id":"update-from-old-version",
         "conditions":{
-            "firmware_notecard.version": "7.5.4.345",
-            "firmware_host.version": "3.1.1",
+            "firmware_notecard.ver_major": 7,
+            "firmware_notecard.ver_minor": 5,
+            "firmware_notecard.ver_patch": 4,
+            "firmware_host.ver_major": 3,
+            "firmware_host.ver_minor": 1,
+            "firmware_host.ver_patch": 1,
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
         "target_versions":{
@@ -310,8 +412,9 @@ My_Rule_Set = [
     {
         "id":"update-legacy-firmware",
         "conditions":{
-            "firmware_notecard.version": "6.2.3.123",
-            "firmware_host.version": "2.1",
+            # Use lambda for range checks
+            "firmware_notecard.ver_major": lambda major: major < 7,  # Any major version < 7
+            "firmware_host.ver_major": lambda major: major <= 2,     # Host major version <= 2
             "fleets": lambda fleet_list: "fleet:abc-def-ghi-jklmno" in fleet_list
         },
         "target_versions":{
@@ -445,8 +548,13 @@ Environmental_Sensor_Rules = [
     {
         "id": "desired-state-outdoor-sensors",
         "conditions": {
-            "firmware_notecard": "8.1.3",
-            "firmware_host": "3.1.2", 
+            # Use parsed version fields for reliable version checking
+            "firmware_notecard.ver_major": 8,
+            "firmware_notecard.ver_minor": 1,
+            "firmware_notecard.ver_patch": 3,
+            "firmware_host.ver_major": 3,
+            "firmware_host.ver_minor": 1,
+            "firmware_host.ver_patch": 2,
             "deviceType": "environmental-sensor",
             "location": "outdoor",
             "fleets": lambda fleet_list: "fleet:production" in fleet_list,
@@ -460,7 +568,10 @@ Environmental_Sensor_Rules = [
             "deviceType": "environmental-sensor",
             "location": "outdoor",
             "fleets": lambda fleet_list: "fleet:production" in fleet_list,
-            "firmware_notecard": lambda v: v.startswith("8.1.2"),  # Any 8.1.2.x version
+            # Use version fields for reliable version range checking
+            "firmware_notecard.ver_major": 8,
+            "firmware_notecard.ver_minor": 1,
+            "firmware_notecard.ver_patch": 2,  # Exactly version 8.1.2.x
             "batteryLevel": lambda level: level > 50  # Only update if battery sufficient
         },
         "target_versions": {
@@ -473,7 +584,9 @@ Environmental_Sensor_Rules = [
         "conditions": {
             "environment": "harsh",
             "signalStrength": lambda strength: strength > -75,  # Good signal
-            "fleets": lambda fleet_list: any(fleet in fleet_list for fleet in ["fleet:industrial", "fleet:outdoor"])
+            "fleets": lambda fleet_list: any(fleet in fleet_list for fleet in ["fleet:industrial", "fleet:outdoor"]),
+            # Only apply to specific version ranges
+            "firmware_notecard.ver_major": lambda major: major < 8  # Upgrade older versions
         },
         "target_versions": {
             "notecard": "8.1.4-harsh"  # Special firmware for harsh environments
@@ -540,7 +653,7 @@ device_data = {
 
 #### Match Condition with String
 
-If the value of a condition is a string, then an exact match is required. For example, if the value for `"firmware_notecard"` is `"8.1.3"`, then the condition will only be satisfied if the device's Notecard firmware version is exactly `"8.1.3"` and will not match `"8.1.3.17074"`.
+If the value of a condition is a string, then an exact match is required. For example, if the value for `"firmware_notecard.version"` is `"8.1.3"`, then the condition will only be satisfied if the device's Notecard firmware version is exactly `"8.1.3"` and will not match `"8.1.3.17074"`.
 
 #### Match Condition with Function
 
@@ -548,7 +661,7 @@ If the value of a condition is a function, it must accept the device field value
 
 ```python
 {
-    "firmware_notecard": lambda v: v and v.startswith("8.1.3"),
+    "firmware_notecard.version": lambda v: v and v.startswith("8.1.3"),
     "batteryLevel": lambda level: level > 50,
     "fleets": lambda fleet_list: "fleet:production" in fleet_list,
     "environment": lambda env: env in ["production", "staging"]
@@ -567,7 +680,7 @@ Functions can be:
 "fleets": lambda fleet_list: any(fleet in fleet_list for fleet in ["fleet:prod", "fleet:staging"])
 
 # Version range check
-"firmware_notecard": lambda v: v and "8.1.2" <= v < "8.2.0"
+"firmware_notecard.version": lambda v: v and "8.1.2" <= v < "8.2.0"
 
 # Combined environment and signal strength
 "location": lambda loc: loc == "outdoor",
@@ -648,8 +761,6 @@ Update_Host_Before_Notecard = [
     {
         "id":"update-notecard-after-host",
         "conditions": {
-            "firmware_host": lambda v: majorVersion(v) >= 2,  # Host already updated
-            "firmware_notecard": lambda v: majorVersion(v) < 8,
             "fleets": lambda fleet_list: "fleet:production" in fleet_list
         },
         "target_versions":{

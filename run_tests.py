@@ -78,6 +78,14 @@ def run_tests_with_coverage():
     except Exception as e:
         print(f"Could not generate HTML report: {e}")
     
+    # Generate XML report for CI/CD integration (e.g., Codecov)
+    try:
+        xml_file = os.path.join(os.path.dirname(__file__), 'coverage.xml')
+        cov.xml_report(outfile=xml_file)
+        print(f"XML coverage report generated: {xml_file}")
+    except Exception as e:
+        print(f"Could not generate XML report: {e}")
+    
     return result.wasSuccessful()
 
 
