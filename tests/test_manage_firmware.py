@@ -204,6 +204,26 @@ class TestFirmwareCache(unittest.TestCase):
         mock_update.assert_called_once_with(self.mock_project)
         self.assertEqual(result, 'notecard-8.1.3.bin')
 
+    def test_firmware_cache_retrieve_invalid_filename_empty_string(self):
+        """Test FirmwareCache.retrieve raises exception for empty filename string."""
+        self.cache.cache = {manage_firmware.FirmwareType.Notecard: {"1.0.0": ""}}  
+        self.cache.cache_expiry = time.time() + 1000
+        
+        with self.assertRaises(Exception) as context:
+            self.cache.retrieve(self.mock_project, manage_firmware.FirmwareType.Notecard, "1.0.0")
+        
+        self.assertIn("Invalid firmware file name", str(context.exception))
+
+    def test_firmware_cache_retrieve_invalid_filename_non_string(self):
+        """Test FirmwareCache.retrieve raises exception for non-string filename."""
+        self.cache.cache = {manage_firmware.FirmwareType.Notecard: {"1.0.0": None}}  
+        self.cache.cache_expiry = time.time() + 1000
+        
+        with self.assertRaises(Exception) as context:
+            self.cache.retrieve(self.mock_project, manage_firmware.FirmwareType.Notecard, "1.0.0")
+        
+        self.assertIn("Invalid firmware file name", str(context.exception))
+
 
 
 class TestFetchDeviceFirmwareInfo(unittest.TestCase):
@@ -246,6 +266,55 @@ class TestFetchDeviceFirmwareInfo(unittest.TestCase):
         )
         
         self.assertEqual(result, {})
+
+
+class TestCheckUpdateToTargetVersion(unittest.TestCase):
+    """Test cases for checkUpdateToTargetVersion function."""
+    
+    def setUp(self):
+        self.mock_project = MagicMock()
+    
+    def test_check_update_firmware_cache_exception(self):
+        """Test checkUpdateToTargetVersion handles firmwareCache.retrieve exceptions."""
+        with patch.object(manage_firmware.firmwareCache, 'retrieve') as mock_retrieve:
+            mock_retrieve.side_effect = Exception("Cache retrieval failed")
+            
+            target_versions = {manage_firmware.FirmwareType.Notecard: "2.0.0"}
+            
+            should_update, message, target_version, filename = manage_firmware.checkUpdateToTargetVersion(
+                self.mock_project, 
+                'device123', 
+                '1.0.0',  # current version
+                target_versions, 
+                manage_firmware.FirmwareType.Notecard
+            )
+            
+            self.assertFalse(should_update)
+            self.assertIn("Cannot update", message)
+            self.assertIn("Cache retrieval failed", message)
+            self.assertEqual(target_version, "2.0.0")
+            self.assertIsNone(filename)
+    
+    def test_check_update_firmware_cache_returns_none(self):
+        """Test checkUpdateToTargetVersion handles when firmwareCache.retrieve returns None."""
+        with patch.object(manage_firmware.firmwareCache, 'retrieve') as mock_retrieve:
+            mock_retrieve.return_value = None  # Return None instead of filename
+            
+            target_versions = {manage_firmware.FirmwareType.Notecard: "2.0.0"}
+            
+            should_update, message, target_version, filename = manage_firmware.checkUpdateToTargetVersion(
+                self.mock_project, 
+                'device123', 
+                '1.0.0',  # current version
+                target_versions, 
+                manage_firmware.FirmwareType.Notecard
+            )
+            
+            self.assertFalse(should_update)
+            self.assertIn("Cannot update", message)
+            self.assertIn("Unable to locate", message)
+            self.assertEqual(target_version, "2.0.0")
+            self.assertIsNone(filename)
 
 
 class TestManageFirmware(unittest.TestCase):
