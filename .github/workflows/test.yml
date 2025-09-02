@@ -49,17 +49,32 @@ jobs:
     - name: Generate coverage summary (Python 3.11 only)
       if: matrix.python-version == '3.11'
       run: |
-        # Extract coverage percentage
+        # Generate coverage report to file to avoid GitHub Actions parsing issues
+        python -m coverage report > coverage_report.txt 2>&1 || echo "Coverage report failed"
+        
+        # Extract coverage percentage safely
         COVERAGE=$(python -c "
         try:
             import coverage
+            import sys
+            import io
+            
+            # Redirect stdout to capture only the percentage
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            
             cov = coverage.Coverage()
             cov.load()
             total = cov.report(show_missing=False)
+            
+            # Restore stdout
+            sys.stdout = old_stdout
+            
             print(f'{total:.0f}')
-        except:
+        except Exception as e:
             print('0')
         ")
+        
         echo "COVERAGE_PERCENTAGE=${COVERAGE}" >> $GITHUB_ENV
         echo "📊 Coverage: ${COVERAGE}%"
         
@@ -79,6 +94,7 @@ jobs:
         name: coverage-report-${{ github.run_number }}
         path: |
           coverage.xml
+          coverage_report.txt
           htmlcov/
         retention-days: 30
 
