@@ -97,24 +97,6 @@ def executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, cur
     return f"Requested {firmwareType} firmware update from {currentVersion} to {targetVersion}."
 
 
-def requestUpdateToTargetVersion(project, deviceUID, currentVersion, target_versions, firmwareType):
-    """
-    Legacy function that combines check and execute for backward compatibility.
-    """
-    should_update, message, target_version, filename = checkUpdateToTargetVersion(
-        project, deviceUID, currentVersion, target_versions, firmwareType
-    )
-    
-    if not should_update:
-        return message
-    
-    # Execute the update
-    return executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, currentVersion, target_version)
-
-    
-
-
-
 
 def manageFirmware(project, deviceUID, device_data, rules={}, is_dry_run=False):
 
@@ -153,21 +135,34 @@ def manageFirmware(project, deviceUID, device_data, rules={}, is_dry_run=False):
     notecardFirmwareVersion = device_data.get("firmware_notecard", {}).get("version")
     hostFirmwareVersion = device_data.get("firmware_host", {}).get("version")
     
+    #     should_update, message, target_version, filename = checkUpdateToTargetVersion(
+    #     project, deviceUID, currentVersion, target_versions, firmwareType
+    # )
     
-    if is_dry_run:
-        # In dry-run mode, only check what updates would be performed
-        nc_should_update, ncMessage, _, _ = checkUpdateToTargetVersion(
-            project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard
-        )
-        host_should_update, hostMessage, _, _ = checkUpdateToTargetVersion(
-            project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host
-        )
-    else:
-        # Normal mode - actually perform updates
-        ncMessage   = requestUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
-        hostMessage = requestUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
+    # if not should_update:
+    #     return message
+    
+    # Execute the update
+    # return executeUpdateToTargetVersion(project, deviceUID, filename, firmwareType, currentVersion, target_version)
+    
+    nc_should_update, nc_message, nc_target_version, nc_filename = checkUpdateToTargetVersion(project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard)
+    host_should_update, host_message, host_target_version, host_filename = checkUpdateToTargetVersion(project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host)
 
-    m = " ".join([f"{dry_run_prefix}{ruleMessage}", ncMessage, hostMessage])
+    # if is_dry_run:
+    #     # In dry-run mode, only check what updates would be performed
+    #     nc_should_update, ncMessage, _, _ = checkUpdateToTargetVersion(
+    #         project, deviceUID, notecardFirmwareVersion, target_versions, FirmwareType.Notecard
+    #     )
+    #     host_should_update, hostMessage, _, _ = checkUpdateToTargetVersion(
+    #         project, deviceUID, hostFirmwareVersion, target_versions, FirmwareType.Host
+    #     )
+    if not is_dry_run:
+        if nc_should_update:
+            nc_message = executeUpdateToTargetVersion(project, deviceUID, nc_filename, FirmwareType.Notecard, notecardFirmwareVersion, nc_target_version)
+        if host_should_update:
+            host_message = executeUpdateToTargetVersion(project, deviceUID, host_filename, FirmwareType.Host, hostFirmwareVersion, host_target_version)
+
+    m = " ".join([f"{dry_run_prefix}{ruleMessage}", nc_message, host_message])
     
     return m
 
